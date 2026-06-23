@@ -1,21 +1,20 @@
 import sys
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 import numpy as np
 import pandas as pd
 
 from hfr_config import (
     BLUE_MAIN,
-    BLUE_SECONDARY,
     DISPLAY_FRAME_ID,
     FIGURE_DIR,
     NEUTRAL_BLACK,
-    NEUTRAL_LIGHT,
+    NEUTRAL_DARK,
     NEUTRAL_MID,
     RED_STRONG,
     RESULT_DIR,
     TABLE_DIR,
-    TRACK_COLOR_LIST,
     configure_plot_style,
     ensure_output_dirs,
     load_point_table,
@@ -23,21 +22,24 @@ from hfr_config import (
 )
 
 
-# 空间密度网格数来源：兼顾细节和可读性
-SPATIAL_GRIDSIZE = 56
-# 距离速度密度网格数来源：体现R-D域分布
-RANGE_VELOCITY_GRIDSIZE = 58
-# 原始点透明度来源：作为背景信息弱化显示
-BACKGROUND_ALPHA = 0.28
-# 候选点大小来源：比背景点更醒目
-CANDIDATE_POINT_SIZE = 13
-# 中心点大小来源：突出候选中心但不遮挡
-CENTER_POINT_SIZE = 38
-
-
-def add_panel_label(axis, label: str) -> None:
-    # 添加Nature风格小写面板编号
-    axis.text(-0.11, 1.05, label, transform=axis.transAxes, fontsize=9, fontweight="bold", va="top", ha="left")
+# 空间密度网格数来源：全局点迹分布展示
+SPATIAL_GRIDSIZE = 62
+# 全局散点大小来源：全部点迹数量较多
+GLOBAL_POINT_SIZE = 3
+# 全局散点透明度来源：兼顾密集区和稀疏区
+GLOBAL_POINT_ALPHA = 0.34
+# 雷达站标记大小来源：空间坐标原点提示
+RADAR_MARKER_SIZE = 42
+# 单帧背景点大小来源：保证报告缩放后仍可辨认
+BACKGROUND_POINT_SIZE = 12
+# 单帧背景透明度来源：保留背景结构
+BACKGROUND_ALPHA = 0.42
+# 强点大小来源：突出信噪比和幅度筛选结果
+STRONG_POINT_SIZE = 22
+# 候选中心大小来源：标记聚类中心
+CENTER_POINT_SIZE = 26
+# 局部视窗边距来源：给标注和箭头留白
+VIEW_PADDING_KM = 6.0
 
 
 def read_result_table(file_name: str) -> pd.DataFrame:
@@ -45,169 +47,148 @@ def read_result_table(file_name: str) -> pd.DataFrame:
     return pd.read_csv(RESULT_DIR / file_name)
 
 
-def plot_data_overview(point_table: pd.DataFrame) -> None:
-    # 绘制数据空间分布和距离速度分布
-    finite_table = point_table.replace([np.inf, -np.inf], np.nan).dropna(subset=["x", "y", "range", "velocity"])
-    figure, axes = plt.subplots(1, 2, figsize=(7.2, 3.25), constrained_layout=True)
+def set_equal_axis(axis: plt.Axes) -> None:
+    # 设置平面坐标轴样式
+    axis.set_xlabel("x / km")
+    axis.set_ylabel("y / km")
+    axis.set_aspect("equal", adjustable="box")
+    axis.grid(True, alpha=0.38)
 
-    spatial_plot = axes[0].hexbin(
+
+def plot_spatial_density(point_table: pd.DataFrame) -> None:
+    # 绘制全局点迹空间密度图
+    finite_table = point_table.replace([np.inf, -np.inf], np.nan).dropna(subset=["x", "y"])
+    figure, axis = plt.subplots(figsize=(4.8, 4.25), constrained_layout=True)
+    density_plot = axis.hexbin(
         finite_table["x"],
         finite_table["y"],
         gridsize=SPATIAL_GRIDSIZE,
         cmap="Blues",
+        norm=LogNorm(),
         mincnt=1,
         linewidths=0,
     )
-    axes[0].set_title("点迹空间密度")
-    axes[0].set_xlabel("x / km")
-    axes[0].set_ylabel("y / km")
-    axes[0].set_aspect("equal", adjustable="box")
-    axes[0].grid(True, alpha=0.35)
-    add_panel_label(axes[0], "a")
-    figure.colorbar(spatial_plot, ax=axes[0], label="点迹数", fraction=0.046, pad=0.03)
+    axis.set_title("点迹空间密度")
+    set_equal_axis(axis)
+    colorbar = figure.colorbar(density_plot, ax=axis, label="点迹数（对数色标）", fraction=0.048, pad=0.025)
+    colorbar.outline.set_linewidth(0.5)
+    save_figure(figure, "图1_点迹空间密度.png")
 
-    range_velocity_plot = axes[1].hexbin(
-        finite_table["range"],
-        finite_table["velocity"],
-        gridsize=RANGE_VELOCITY_GRIDSIZE,
-        cmap="Greys",
-        mincnt=1,
+
+def plot_spatial_distribution(point_table: pd.DataFrame) -> None:
+    # 绘制全局点迹空间散点分布图
+    finite_table = point_table.replace([np.inf, -np.inf], np.nan).dropna(subset=["x", "y"])
+    figure, axis = plt.subplots(figsize=(4.8, 4.25), constrained_layout=True)
+    axis.scatter(
+        finite_table["x"],
+        finite_table["y"],
+        s=GLOBAL_POINT_SIZE,
+        color=NEUTRAL_DARK,
+        alpha=GLOBAL_POINT_ALPHA,
         linewidths=0,
+        rasterized=True,
     )
-    axes[1].axhline(0, color=NEUTRAL_MID, linewidth=0.8, linestyle="--", alpha=0.8)
-    axes[1].set_title("距离-径向速度分布")
-    axes[1].set_xlabel("距离 / km")
-    axes[1].set_ylabel("径向速度 / (km h$^{-1}$)")
-    axes[1].grid(True, alpha=0.35)
-    add_panel_label(axes[1], "b")
-    figure.colorbar(range_velocity_plot, ax=axes[1], label="点迹数", fraction=0.046, pad=0.03)
+    axis.scatter(
+        [0],
+        [0],
+        s=RADAR_MARKER_SIZE,
+        marker="^",
+        color=RED_STRONG,
+        linewidths=0,
+        zorder=5,
+    )
+    axis.annotate("坐标原点", (0, 0), xytext=(5, 5), textcoords="offset points", fontsize=7.5, color=NEUTRAL_BLACK)
+    axis.set_title("点迹空间分布")
+    set_equal_axis(axis)
+    save_figure(figure, "图2_点迹空间分布.png")
 
-    save_figure(figure, "图1_点迹数据概览.png")
+
+def get_candidate_points(frame_strong_points: pd.DataFrame, frame_clusters: pd.DataFrame) -> pd.DataFrame:
+    # 提取通过聚类确认的候选点
+    accepted_cluster_ids = set(frame_clusters["cluster_id"].astype(int).tolist())
+    return frame_strong_points[frame_strong_points["cluster_id"].isin(accepted_cluster_ids)]
 
 
-def plot_detection_process(point_table: pd.DataFrame, strong_point_table: pd.DataFrame, cluster_table: pd.DataFrame) -> None:
-    # 绘制单帧目标候选检测过程
+def set_detection_view(axis: plt.Axes, frame_table: pd.DataFrame, frame_clusters: pd.DataFrame) -> None:
+    # 设置单帧检测图展示范围
+    if frame_clusters.empty:
+        x_min, x_max = frame_table["x"].min(), frame_table["x"].max()
+        y_min, y_max = frame_table["y"].min(), frame_table["y"].max()
+    else:
+        x_min, x_max = frame_clusters["center_x"].min(), frame_clusters["center_x"].max()
+        y_min, y_max = frame_clusters["center_y"].min(), frame_clusters["center_y"].max()
+    axis.set_xlim(x_min - VIEW_PADDING_KM * 1.55, x_max + VIEW_PADDING_KM * 1.55)
+    axis.set_ylim(y_min - VIEW_PADDING_KM * 1.45, y_max + VIEW_PADDING_KM * 1.45)
+
+
+def plot_single_frame_detection(
+    point_table: pd.DataFrame,
+    strong_point_table: pd.DataFrame,
+    cluster_table: pd.DataFrame,
+) -> None:
+    # 绘制单帧候选检测结果图
     frame_table = point_table[point_table["frame_idx"] == DISPLAY_FRAME_ID]
     frame_strong_points = strong_point_table[strong_point_table["frame_idx"] == DISPLAY_FRAME_ID]
     frame_clusters = cluster_table[cluster_table["frame_idx"] == DISPLAY_FRAME_ID]
-    accepted_cluster_ids = set(frame_clusters["cluster_id"].astype(int).tolist())
-    frame_candidate_points = frame_strong_points[frame_strong_points["cluster_id"].isin(accepted_cluster_ids)]
+    frame_candidate_points = get_candidate_points(frame_strong_points, frame_clusters)
 
-    figure, axes = plt.subplots(1, 2, figsize=(7.2, 3.25), constrained_layout=True)
-    for axis in axes:
-        axis.scatter(frame_table["x"], frame_table["y"], s=7, color=NEUTRAL_LIGHT, alpha=BACKGROUND_ALPHA, linewidths=0)
-        axis.set_xlabel("x / km")
-        axis.set_ylabel("y / km")
-        axis.set_aspect("equal", adjustable="box")
-        axis.grid(True, alpha=0.35)
-        if not frame_clusters.empty:
-            axis.set_xlim(frame_clusters["center_x"].min() - 42, frame_clusters["center_x"].max() + 42)
-            axis.set_ylim(frame_clusters["center_y"].min() - 42, frame_clusters["center_y"].max() + 42)
-
-    axes[0].scatter(frame_strong_points["x"], frame_strong_points["y"], s=10, color=BLUE_SECONDARY, alpha=0.72, linewidths=0)
-    axes[0].set_title(f"第{DISPLAY_FRAME_ID}帧强点筛选")
-    axes[0].text(
-        0.03,
-        0.96,
-        f"强点数：{len(frame_strong_points)}",
-        transform=axes[0].transAxes,
-        va="top",
-        fontsize=7,
-        bbox={"fc": "white", "ec": "#cccccc", "lw": 0.4, "boxstyle": "round,pad=0.25"},
+    figure, axis = plt.subplots(figsize=(4.9, 4.1), constrained_layout=True)
+    axis.scatter(
+        frame_table["x"],
+        frame_table["y"],
+        s=BACKGROUND_POINT_SIZE,
+        color=NEUTRAL_DARK,
+        alpha=BACKGROUND_ALPHA,
+        linewidths=0,
+        label="原始点迹",
     )
-    add_panel_label(axes[0], "a")
-
-    axes[1].scatter(frame_candidate_points["x"], frame_candidate_points["y"], s=CANDIDATE_POINT_SIZE, color=BLUE_MAIN, alpha=0.82, linewidths=0)
-    axes[1].scatter(
-        frame_clusters["center_x"],
-        frame_clusters["center_y"],
-        s=CENTER_POINT_SIZE,
-        marker="x",
-        color=RED_STRONG,
-        linewidths=1.4,
+    axis.scatter(
+        frame_candidate_points["x"],
+        frame_candidate_points["y"],
+        s=STRONG_POINT_SIZE,
+        color=BLUE_MAIN,
+        alpha=0.9,
+        linewidths=0,
+        label="候选点",
     )
-    axes[1].set_title("聚类后的候选目标")
-    axes[1].text(
-        0.03,
-        0.96,
-        f"候选簇数：{len(frame_clusters)}",
-        transform=axes[1].transAxes,
-        va="top",
-        fontsize=7,
-        bbox={"fc": "white", "ec": "#cccccc", "lw": 0.4, "boxstyle": "round,pad=0.25"},
-    )
-    add_panel_label(axes[1], "b")
 
-    save_figure(figure, "图2_单帧候选检测.png")
-
-
-def plot_confirmed_tracks(cluster_table: pd.DataFrame, confirmed_tracks: pd.DataFrame, track_summary: pd.DataFrame) -> None:
-    # 绘制多帧确认航迹
-    figure, axis = plt.subplots(figsize=(5.1, 4.2), constrained_layout=True)
-    if confirmed_tracks.empty:
-        axis.text(0.5, 0.5, "未形成确认航迹", transform=axis.transAxes, ha="center", va="center")
-        save_figure(figure, "图3_多帧确认航迹.png")
-        return
-
-    x_min = confirmed_tracks["center_x"].min() - 18
-    x_max = confirmed_tracks["center_x"].max() + 18
-    y_min = confirmed_tracks["center_y"].min() - 16
-    y_max = confirmed_tracks["center_y"].max() + 16
-    background_clusters = cluster_table[
-        (cluster_table["center_x"] >= x_min)
-        & (cluster_table["center_x"] <= x_max)
-        & (cluster_table["center_y"] >= y_min)
-        & (cluster_table["center_y"] <= y_max)
-    ]
-
-    axis.scatter(background_clusters["center_x"], background_clusters["center_y"], s=12, color=NEUTRAL_LIGHT, alpha=0.45, linewidths=0)
-
-    for color_idx, (track_id, track_table) in enumerate(confirmed_tracks.groupby("track_id")):
-        ordered_track = track_table.sort_values("frame_idx")
-        track_color = TRACK_COLOR_LIST[color_idx % len(TRACK_COLOR_LIST)]
-        start_row = ordered_track.iloc[0]
-        end_row = ordered_track.iloc[-1]
-        summary_row = track_summary[track_summary["track_id"] == track_id].iloc[0]
-        axis.plot(
-            ordered_track["center_x"],
-            ordered_track["center_y"],
-            color=track_color,
-            linewidth=1.35,
+    for cluster_order, cluster_row in enumerate(frame_clusters.sort_values("center_y", ascending=False).itertuples(), start=1):
+        # 标注每个候选簇
+        axis.scatter(
+            [cluster_row.center_x],
+            [cluster_row.center_y],
+            s=CENTER_POINT_SIZE,
             marker="o",
-            markersize=2.8,
-            alpha=0.95,
-        )
-        axis.scatter(start_row["center_x"], start_row["center_y"], s=32, facecolors="white", edgecolors=track_color, linewidths=1.0, zorder=4)
-        axis.scatter(end_row["center_x"], end_row["center_y"], s=34, marker="s", color=track_color, zorder=4)
-        axis.annotate(
-            "",
-            xy=(end_row["center_x"], end_row["center_y"]),
-            xytext=(ordered_track.iloc[-2]["center_x"], ordered_track.iloc[-2]["center_y"]),
-            arrowprops={"arrowstyle": "->", "color": track_color, "lw": 1.1},
+            color=RED_STRONG,
+            linewidths=0,
+            zorder=6,
         )
         axis.annotate(
-            f"T{int(track_id)}  F{int(summary_row['start_frame'])}-F{int(summary_row['end_frame'])}",
-            (end_row["center_x"], end_row["center_y"]),
+            f"C{cluster_order}",
+            (cluster_row.center_x, cluster_row.center_y),
+            xytext=(5, 5),
             textcoords="offset points",
-            xytext=(4, 4),
-            fontsize=7,
+            fontsize=7.5,
             color=NEUTRAL_BLACK,
-            bbox={"fc": "white", "ec": "#cccccc", "lw": 0.35, "boxstyle": "round,pad=0.18", "alpha": 0.9},
+            zorder=7,
         )
 
-    axis.set_title("多帧确认的疑似目标航迹")
-    axis.set_xlabel("x / km")
-    axis.set_ylabel("y / km")
-    axis.set_xlim(x_min, x_max)
-    axis.set_ylim(y_min, y_max)
-    axis.set_aspect("equal", adjustable="box")
-    axis.grid(True, alpha=0.35)
-    axis.scatter([], [], s=12, color=NEUTRAL_LIGHT, label="候选中心")
-    axis.scatter([], [], s=32, facecolors="white", edgecolors=NEUTRAL_BLACK, linewidths=1.0, label="起点")
-    axis.scatter([], [], s=34, marker="s", color=NEUTRAL_BLACK, label="终点")
-    axis.legend(loc="upper right", frameon=False)
-
-    save_figure(figure, "图3_多帧确认航迹.png")
+    axis.set_title(f"第{DISPLAY_FRAME_ID}帧候选簇提取")
+    set_equal_axis(axis)
+    set_detection_view(axis, frame_table, frame_clusters)
+    axis.scatter([], [], s=CENTER_POINT_SIZE, marker="o", color=RED_STRONG, label="候选中心")
+    axis.legend(loc="upper right", frameon=False, handletextpad=0.45)
+    axis.text(
+        0.03,
+        0.96,
+        f"灰点：本帧点迹\n蓝点：候选点",
+        transform=axis.transAxes,
+        va="top",
+        fontsize=7.5,
+        color=NEUTRAL_BLACK,
+        bbox={"fc": "white", "ec": "#bdbdbd", "lw": 0.4, "boxstyle": "round,pad=0.22", "alpha": 0.9},
+    )
+    save_figure(figure, "图3_单帧候选检测.png")
 
 
 def main():
@@ -216,17 +197,15 @@ def main():
     ensure_output_dirs()
     configure_plot_style()
 
-    # 读取数据和结果
+    # 读取数据和检测结果
     point_table = load_point_table()
     strong_point_table = pd.read_csv(TABLE_DIR / "strong_points.csv")
     cluster_table = read_result_table("candidate_clusters.csv")
-    confirmed_tracks = read_result_table("confirmed_tracks.csv")
-    track_summary = read_result_table("track_summary.csv")
 
-    # 生成三张主图
-    plot_data_overview(point_table)
-    plot_detection_process(point_table, strong_point_table, cluster_table)
-    plot_confirmed_tracks(cluster_table, confirmed_tracks, track_summary)
+    # 生成三张单图
+    plot_spatial_density(point_table)
+    plot_spatial_distribution(point_table)
+    plot_single_frame_detection(point_table, strong_point_table, cluster_table)
 
     # 输出图片目录
     print(f"主图已保存：{FIGURE_DIR}")

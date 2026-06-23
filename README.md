@@ -9,7 +9,7 @@ code/
   hfr_config.py           路径、参数、绘图风格和数据读取
   01_prepare_data.py      点迹表格整理
   02_detect_and_track.py  候选检测与多帧航迹确认
-  03_make_figures.py      生成三张报告主图
+  03_make_figures.py      生成三张单幅报告主图
   04_analyze_results.py   生成实验结果分析
 
 report/
@@ -48,7 +48,7 @@ python code\04_analyze_results.py
 
 运行后会生成：
 
-- `report/figures/`：三张报告主图，同时输出 PNG、SVG、PDF
+- `report/figures/`：三张单幅报告主图，同时输出 PNG、SVG、PDF
 - `report/tables/`：整理后的点迹表和每帧统计表
 - `report/results/`：候选目标和确认航迹结果
 - `report/实验结果分析.md`：实验结果的文字分析
@@ -61,4 +61,4 @@ python code\04_analyze_results.py
 点迹数据 -> 数据清洗 -> 信噪比和幅度初筛 -> DBSCAN聚类 -> 多帧连续性确认
 ```
 
-该流程不训练神经网络模型，重点是从点迹中提取目标候选并通过多帧运动连续性降低虚警。
+该流程不训练神经网络模型，重点是从点迹中提取目标候选，并通过多帧运动连续性和航迹质量指标降低虚警。报告主图保留点迹空间密度、点迹空间分布和单帧候选检测；多帧航迹确认结果采用表格审查，避免用跳变明显的空间折线图造成误读。

@@ -197,7 +197,26 @@ def summarize_tracks(confirmed_tracks: pd.DataFrame) -> pd.DataFrame:
         track_summary["end_x"] - track_summary["start_x"],
         track_summary["end_y"] - track_summary["start_y"],
     )
-    return track_summary.sort_values(["frame_count", "mean_snr"], ascending=False)
+    quality_rows = []
+    for track_id, track_group in ordered_tracks.groupby("track_id"):
+        # 计算航迹形态质量指标
+        coordinate_values = track_group[["center_x", "center_y"]].to_numpy(dtype=float)
+        step_distances = np.linalg.norm(np.diff(coordinate_values, axis=0), axis=1)
+        path_length = float(step_distances.sum())
+        displacement = float(np.linalg.norm(coordinate_values[-1] - coordinate_values[0]))
+        straightness = displacement / path_length if path_length > 0 else 0.0
+        quality_rows.append(
+            {
+                "track_id": track_id,
+                "path_length": path_length,
+                "straightness": straightness,
+                "mean_step": float(step_distances.mean()) if len(step_distances) else 0.0,
+                "max_step": float(step_distances.max()) if len(step_distances) else 0.0,
+            }
+        )
+    quality_table = pd.DataFrame(quality_rows)
+    track_summary = track_summary.merge(quality_table, on="track_id", how="left")
+    return track_summary.sort_values(["straightness", "frame_count", "mean_snr"], ascending=False)
 
 
 def main():
