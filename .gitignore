@@ -11,6 +11,7 @@ __pycache__/
 # 本地编辑器配置
 .vscode/
 .idea/
+.codex_tmp/
 
 # 课程原始数据与资料
 点迹数据/

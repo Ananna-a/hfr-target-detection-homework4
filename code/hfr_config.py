@@ -1,0 +1,170 @@
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import scipy.io as sio
+
+
+# 项目根目录来源：code目录的上一级
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# 数据文件来源：课程提供的点迹数据
+DATA_FILE = PROJECT_ROOT / "点迹数据" / "HFRData.mat"
+# 表格目录来源：保存中间整理数据
+TABLE_DIR = PROJECT_ROOT / "report" / "tables"
+# 结果目录来源：保存检测与航迹结果
+RESULT_DIR = PROJECT_ROOT / "report" / "results"
+# 图片目录来源：保存报告主图
+FIGURE_DIR = PROJECT_ROOT / "report" / "figures"
+# xy字段列索引来源：字段说明中xy为x、vx、y、vy
+XY_X_COL = 0
+XY_VX_COL = 1
+XY_Y_COL = 2
+XY_VY_COL = 3
+# 速度换算来源：1 m/s = 3.6 km/h
+KMH_TO_MPS = 3.6
+# 图片分辨率来源：报告插图清晰度要求
+FIGURE_DPI = 300
+# Nature风格蓝色来源：候选目标主强调色
+BLUE_MAIN = "#0F4D92"
+# Nature风格浅蓝来源：候选目标辅助色
+BLUE_SECONDARY = "#3775BA"
+# Nature风格红色来源：中心或终点强调色
+RED_STRONG = "#B64342"
+# Nature风格中性浅灰来源：背景点迹
+NEUTRAL_LIGHT = "#CFCECE"
+# Nature风格中性中灰来源：辅助元素
+NEUTRAL_MID = "#767676"
+# Nature风格中性深灰来源：文字和坐标轴
+NEUTRAL_DARK = "#4D4D4D"
+# Nature风格黑色来源：关键线条
+NEUTRAL_BLACK = "#272727"
+# 航迹颜色来源：低饱和色系区分确认航迹
+TRACK_COLOR_LIST = ["#0F4D92", "#42949E", "#9A4D8E", "#B64342"]
+
+# 信噪比分位阈值来源：保留每帧高信噪比点迹
+SNR_QUANTILE = 0.85
+# 幅度分位阈值来源：保留每帧高幅度点迹
+AMP_QUANTILE = 0.65
+# 聚类空间尺度来源：目标候选邻域经验尺度
+SPACE_SCALE_KM = 10.0
+# 聚类速度尺度来源：径向速度差经验尺度
+VELOCITY_SCALE_KMH = 15.0
+# 聚类信噪比尺度来源：有效信噪比分布跨度
+SNR_SCALE_DB = 6.0
+# 聚类幅度尺度来源：有效幅度分布跨度
+AMP_SCALE = 15.0
+# DBSCAN邻域半径来源：物理尺度归一化后的经验值
+DBSCAN_EPS = 1.10
+# DBSCAN最少点数来源：候选点簇稳定性要求
+DBSCAN_MIN_SAMPLES = 4
+# 候选簇最小点数来源：过滤过小点簇
+MIN_CLUSTER_SIZE = 5
+# 单帧展示帧来源：该帧有较清晰候选点簇
+DISPLAY_FRAME_ID = 42
+# 航迹关联距离来源：相邻帧候选中心最大允许距离
+MAX_LINK_DISTANCE_KM = 12.0
+# 航迹关联速度差来源：相邻帧径向速度最大允许差
+MAX_VELOCITY_DIFF_KMH = 25.0
+# 确认航迹长度来源：过滤短寿命候选
+MIN_TRACK_LENGTH = 5
+
+
+def ensure_output_dirs() -> None:
+    # 创建输出目录
+    TABLE_DIR.mkdir(parents=True, exist_ok=True)
+    RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    FIGURE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def configure_plot_style() -> None:
+    # 配置统一中文绘图风格
+    plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "Arial Unicode MS", "DejaVu Sans"]
+    plt.rcParams["axes.unicode_minus"] = False
+    plt.rcParams["figure.facecolor"] = "white"
+    plt.rcParams["axes.facecolor"] = "white"
+    plt.rcParams["axes.edgecolor"] = "#222222"
+    plt.rcParams["axes.linewidth"] = 0.8
+    plt.rcParams["axes.titlesize"] = 10
+    plt.rcParams["axes.labelsize"] = 8
+    plt.rcParams["xtick.labelsize"] = 7
+    plt.rcParams["ytick.labelsize"] = 7
+    plt.rcParams["legend.fontsize"] = 7
+    plt.rcParams["grid.color"] = "#dddddd"
+    plt.rcParams["grid.linestyle"] = "--"
+    plt.rcParams["grid.linewidth"] = 0.55
+    plt.rcParams["svg.fonttype"] = "none"
+    plt.rcParams["pdf.fonttype"] = 42
+    plt.rcParams["axes.spines.top"] = False
+    plt.rcParams["axes.spines.right"] = False
+
+
+def save_figure(figure: plt.Figure, file_name: str) -> Path:
+    # 保存报告图片和矢量文件
+    ensure_output_dirs()
+    figure_path = FIGURE_DIR / file_name
+    figure.savefig(figure_path, dpi=FIGURE_DPI, bbox_inches="tight", facecolor="white")
+    if figure_path.suffix.lower() == ".png":
+        figure.savefig(figure_path.with_suffix(".svg"), bbox_inches="tight", facecolor="white")
+        figure.savefig(figure_path.with_suffix(".pdf"), bbox_inches="tight", facecolor="white")
+    plt.close(figure)
+    return figure_path
+
+
+def load_hfr_data() -> np.ndarray:
+    # 读取MAT文件中的HFRData变量
+    mat_data = sio.loadmat(DATA_FILE)
+    return mat_data["HFRData"]
+
+
+def get_frame_struct(hfr_data: np.ndarray, frame_idx: int) -> np.void:
+    # 获取指定帧结构体
+    return hfr_data[0, frame_idx][0, 0]
+
+
+def get_header_value(frame_struct: np.void, field_name: str) -> float:
+    # 读取帧头字段
+    header_struct = frame_struct["header"][0, 0]
+    return float(np.asarray(header_struct[field_name]).ravel()[0])
+
+
+def frame_to_dataframe(hfr_data: np.ndarray, frame_idx: int) -> pd.DataFrame:
+    # 转换单帧点迹为表格
+    frame_struct = get_frame_struct(hfr_data, frame_idx)
+    xy_values = np.asarray(frame_struct["xy"], dtype=float)
+    point_count = int(np.asarray(frame_struct["PlotCnt"]).ravel()[0])
+    unix_time = get_header_value(frame_struct, "unixtime")
+    velocity_values = np.asarray(frame_struct["velocity"]).reshape(-1).astype(float)
+
+    return pd.DataFrame(
+        {
+            "frame_idx": np.full(point_count, frame_idx + 1, dtype=int),
+            "time": np.full(point_count, unix_time, dtype=float),
+            "id": np.asarray(frame_struct["id"]).reshape(-1).astype(int),
+            "range": np.asarray(frame_struct["range"]).reshape(-1).astype(float),
+            "velocity": velocity_values,
+            "velocity_mps": velocity_values / KMH_TO_MPS,
+            "ang": np.asarray(frame_struct["ang"]).reshape(-1).astype(float),
+            "x": xy_values[:, XY_X_COL],
+            "vx": xy_values[:, XY_VX_COL],
+            "y": xy_values[:, XY_Y_COL],
+            "vy": xy_values[:, XY_VY_COL],
+            "lon": np.asarray(frame_struct["lon"]).reshape(-1).astype(float),
+            "lat": np.asarray(frame_struct["lat"]).reshape(-1).astype(float),
+            "amp": np.asarray(frame_struct["Amp"]).reshape(-1).astype(float),
+            "rcs": np.asarray(frame_struct["RCS"]).reshape(-1).astype(float),
+            "snr": np.asarray(frame_struct["snr"]).reshape(-1).astype(float),
+            "class_id": np.asarray(frame_struct["Class"]).reshape(-1).astype(int),
+            "flag": np.asarray(frame_struct["flag"]).reshape(-1).astype(int),
+        }
+    )
+
+
+def load_point_table() -> pd.DataFrame:
+    # 读取或生成整理后的点迹表
+    point_table_path = TABLE_DIR / "points_clean.csv"
+    if point_table_path.exists():
+        return pd.read_csv(point_table_path)
+    hfr_data = load_hfr_data()
+    point_tables = [frame_to_dataframe(hfr_data, frame_idx) for frame_idx in range(hfr_data.shape[1])]
+    return pd.concat(point_tables, ignore_index=True)

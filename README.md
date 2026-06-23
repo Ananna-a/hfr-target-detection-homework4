@@ -6,13 +6,11 @@
 
 ```text
 code/
-  01_explore_data.py      数据结构探查
-  02_prepare_points.py    点迹表格整理
-  03_plot_points.py       基础统计图绘制
-  04_detect_targets.py    单帧目标候选检测
-  05_track_targets.py     多帧候选航迹确认
-  hfr_detection.py        目标检测公共逻辑
-  hfr_utils.py            数据读取和绘图工具
+  hfr_config.py           路径、参数、绘图风格和数据读取
+  01_prepare_data.py      点迹表格整理
+  02_detect_and_track.py  候选检测与多帧航迹确认
+  03_make_figures.py      生成三张报告主图
+  04_analyze_results.py   生成实验结果分析
 
 report/
   目标检测原理与工作流程.md
@@ -42,18 +40,18 @@ pip install -r requirements.txt
 ## 运行流程
 
 ```powershell
-python code\01_explore_data.py
-python code\02_prepare_points.py
-python code\03_plot_points.py
-python code\04_detect_targets.py
-python code\05_track_targets.py
+python code\01_prepare_data.py
+python code\02_detect_and_track.py
+python code\03_make_figures.py
+python code\04_analyze_results.py
 ```
 
 运行后会生成：
 
-- `report/figures/`：点迹分布图、检测结果图、航迹图
+- `report/figures/`：三张报告主图，同时输出 PNG、SVG、PDF
 - `report/tables/`：整理后的点迹表和每帧统计表
 - `report/results/`：候选目标和确认航迹结果
+- `report/实验结果分析.md`：实验结果的文字分析
 
 ## 方法概述
 
