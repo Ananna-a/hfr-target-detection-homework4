@@ -175,6 +175,7 @@
   v_r = \frac{\lambda f_d}{2}.
   \label{eq:doppler}
 \end{equation}
+
 因此，数据中的速度字段本质上反映目标沿雷达到目标连线方向的速度分量，而不是完整二维速度。
 
 从目标探测角度看，海上目标能够被高频地波雷达稳定发现通常需要满足两个基本条件：一是目标具有足够大的雷达散射截面，能够在海杂波和环境干扰背景中形成可检测回波；二是目标相对于雷达具有一定径向运动速度，使目标回波在多普勒域中与零多普勒附近的强背景分量分离。若目标回波弱或径向速度过小，即使空间位置上有点迹，也可能难以从海杂波背景中可靠确认。
@@ -184,6 +185,7 @@
   x = r\sin\theta,\qquad y = r\cos\theta.
   \label{eq:xy}
 \end{equation}
+
 本次作业所用数据已经给出 \(x\)、\(y\)、\(v_x\)、\(v_y\) 等字段，因此后续算法直接在点迹层面开展目标候选提取和多帧关联。
 
 \subsection{信号处理流程}
@@ -230,11 +232,13 @@
   H_0: z=n,\qquad H_1:z=s+n,
   \label{eq:hypothesis}
 \end{equation}
+
 其中 \(H_0\) 表示无目标，\(H_1\) 表示有目标，\(n\) 为噪声和杂波，\(s\) 为目标回波。若两类假设下的概率密度已知，可构造似然比
 \begin{equation}
   \Lambda(z)=\frac{p(z|H_1)}{p(z|H_0)}.
   \label{eq:likelihood}
 \end{equation}
+
 当 \(\Lambda(z)>\eta\) 时判定为目标，其中 \(\eta\) 为检测门限。
 
 实际雷达背景随距离、方位和海况变化，固定门限容易造成近距离强杂波误警或远距离弱目标漏检。因此，雷达处理中常使用恒虚警率检测思想。以 CA-CFAR 为例，若用 \(N\) 个参考单元估计背景功率，则
@@ -244,6 +248,7 @@
   \gamma = \alpha\hat{P}_n.
   \label{eq:cfar}
 \end{equation}
+
 当待检测单元功率 \(P_0>\gamma\) 时，认为该单元存在显著目标。若参考单元服从指数分布，为满足虚警概率 \(P_{fa}\)，可取
 \begin{equation}
   \alpha = N\left(P_{fa}^{-1/N}-1\right).
@@ -288,6 +293,7 @@
   T_{A}^{(k)}=Q_{0.65}\left(A_k\right).
   \label{eq:global_threshold}
 \end{equation}
+
 随后按距离将该帧点迹划分为 6 个分区，并在每个分区中计算局部阈值。局部阈值只用于适当降低弱背景区域准入门槛，不用于提高强背景区域门槛：
 \begin{equation}
   T_{\mathrm{snr,local}}=\min\left(T_{\mathrm{snr}}^{(k)}, Q_{0.85}(\mathrm{snr}_{k,b})\right),
@@ -301,6 +307,7 @@
   S_{k,i}=R_{\mathrm{snr}}(k,i)+R_A(k,i),
   \label{eq:signal_score}
 \end{equation}
+
 其中 \(R_{\mathrm{snr}}\) 和 \(R_A\) 分别为该点在当前帧内的信噪比百分位和幅度百分位。若点迹满足局部信噪比和幅度同时过线，或 \(S_{k,i}\ge 1.75\)，则保留为强点。该设计用于补充保留单项特别强的点迹，同时避免大幅放松阈值导致候选簇爆炸。
 
 \subsubsection{空间速度聚类}
@@ -316,11 +323,13 @@
   \right]^T,
   \label{eq:feature}
 \end{equation}
+
 其中 \(L_p=10\ \mathrm{km}\)、\(L_v=15\ \mathrm{km/h}\)、\(L_s=6\ \mathrm{dB}\)、\(L_A=15\) 为归一化尺度。随后使用 DBSCAN 对强点进行聚类。对任一点 \(q_i\)，其 \(\varepsilon\) 邻域定义为
 \begin{equation}
   N_{\varepsilon}(q_i)=\{q_j\mid \|q_i-q_j\|\le \varepsilon\}.
   \label{eq:dbscan}
 \end{equation}
+
 当 \(|N_{\varepsilon}(q_i)|\ge \mathrm{min\_samples}\) 时，\(q_i\) 为核心点。本文采用 \(\varepsilon=1.10\)、\(\mathrm{min\_samples}=4\)，并要求候选簇点数不少于 5。对每个候选簇，本文不再简单采用簇内点迹坐标的算术平均，而是根据信噪比和幅度构造正权重，并对位置、经纬度和速度进行加权平均：
 \begin{equation}
   w_i =
@@ -331,6 +340,7 @@
   \bar{\mathbf{p}}=\frac{\sum_i w_i\mathbf{p}_i}{\sum_i w_i}.
   \label{eq:weighted_center}
 \end{equation}
+
 这样可以使簇中心更多受强回波点影响，减少弱散点对候选中心的扰动。
 
 \subsubsection{多帧关联与航迹确认}
@@ -342,11 +352,13 @@
   \mathbf{x}_t=[x_t,\ v_{x,t},\ y_t,\ v_{y,t}]^T,
   \label{eq:kalman_state}
 \end{equation}
+
 观测向量为候选簇中心
 \begin{equation}
   \mathbf{z}_t=[x_t,\ y_t]^T.
   \label{eq:kalman_measurement}
 \end{equation}
+
 设相隔帧数为 \(\Delta k\)，相邻帧时间间隔为 \(\Delta t=60\ \mathrm{s}\)，速度单位为 \(\mathrm{km/h}\)，则常速预测可写为
 \begin{equation}
   \hat{x}_t=x_{t-1}+v_{x,t-1}\frac{\Delta k\Delta t}{3600},
@@ -354,6 +366,7 @@
   \hat{y}_t=y_{t-1}+v_{y,t-1}\frac{\Delta k\Delta t}{3600}.
   \label{eq:predicted_position}
 \end{equation}
+
 Kalman 预测同时传播状态协方差，记预测观测为 \(\hat{\mathbf{z}}_t=H\hat{\mathbf{x}}_t\)，新息协方差为 \(S_t=H\hat{P}_tH^T+R\)，则候选簇与预测航迹之间的马氏距离为
 \begin{equation}
   d_M^2=(\mathbf{z}_t-\hat{\mathbf{z}}_t)^T
@@ -361,6 +374,7 @@ Kalman 预测同时传播状态协方差，记预测观测为 \(\hat{\mathbf{z}}
   (\mathbf{z}_t-\hat{\mathbf{z}}_t).
   \label{eq:mahalanobis_gate}
 \end{equation}
+
 本文采用马氏距离阈值 \(d_M^2\le 9.21\) 作为主波门，同时保留 \(5.0\ \mathrm{km}\) 的欧氏距离上限以避免协方差过大导致波门过宽；若径向速度差不超过 \(15.0\ \mathrm{km/h}\)，\(v_x,v_y\) 合成速度差不超过 \(8.0\ \mathrm{km/h}\)，则认为当前候选落入跟踪门，并进入方向一致性判别。关联成功后，使用候选中心更新 Kalman 状态；若同一波门内存在多个候选，则选择马氏距离最小者。
 
 连续两段中心位移向量分别为 \(\Delta\mathbf{p}_{t-1}\) 和 \(\Delta\mathbf{p}_t\)，转向角定义为
@@ -373,6 +387,7 @@ Kalman 预测同时传播状态协方差，记预测观测为 \(\hat{\mathbf{z}}
   \right).
   \label{eq:turn_angle}
 \end{equation}
+
 当相邻位移小于 0.25 km 时，不使用转向角判据，以避免短位移抖动放大角度误差；否则要求 \(\phi_t\le 125^\circ\)。
 
 最近邻关联计算简单，适合课程作业中的点迹级后处理，但其局限也很明显：当同一跟踪门内存在多个背景候选或多个目标相互接近时，距离最近的候选不一定是真实目标回波，可能导致误关联或丢跟。因此，本文在最近邻关联之后继续使用长度、直线性、步长和转向角进行质量确认。
@@ -386,6 +401,7 @@ Kalman 预测同时传播状态协方差，记预测观测为 \(\hat{\mathbf{z}}
   \ge 0.60.
   \label{eq:straightness}
 \end{equation}
+
 同时要求相邻帧最大步长不超过 2.00 km，平均步长不超过 1.00 km。该指标越接近 1，说明航迹越接近单调运动；若候选链虽然持续时间较长但来回绕动或突跳明显，则不确认为目标航迹。
 
 \begin{figure}[H]
@@ -476,7 +492,7 @@ Kalman 预测同时传播状态协方差，记预测观测为 \(\hat{\mathbf{z}}
   \label{fig:confirmed_tracks}
 \end{figure}
 
-从图 \ref{fig:confirmed_tracks} 可以看到，T20 出现在第 27--30 帧，持续 4 帧，中心点移动较平滑；T36 出现在第 41--49 帧，持续 8 个有效候选点，中间允许 1 帧短暂缺失后继续关联，因此比原先只看相邻帧的结果更完整；T13 出现在第 13--18 帧，虽然有效候选点数为 4，但存在断帧重连，直线性低于 T20 和 T36。上述差异需要在后续质量评价中进一步量化。
+从图 \ref{fig:confirmed_tracks} 可以看到，T20 出现在第 27--30 帧，持续 4 帧，中心点沿单一方向平滑移动；T36 出现在第 41--49 帧，持续 8 个有效候选点，整体运动趋势较清晰，是三条航迹中持续时间最长的一条；T13 出现在第 13--18 帧，虽然满足最小长度要求，但中间存在短暂缺失，且局部位移变化更明显。上述差异需要在后续质量评价中通过直线性、步长和转向角进一步量化。
 
 \subsubsection{无监督质量评价}
 
