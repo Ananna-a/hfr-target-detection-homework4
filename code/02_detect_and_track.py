@@ -9,6 +9,8 @@ from hfr_config import (
     AMP_SCALE,
     DBSCAN_EPS,
     DBSCAN_MIN_SAMPLES,
+    LOCAL_RANGE_BIN_COUNT,
+    LOCAL_RANGE_MIN_POINTS,
     MAX_DIRECTION_CHANGE_DEG,
     MAX_MEAN_TRACK_STEP_KM,
     MAX_LINK_DISTANCE_KM,
@@ -21,6 +23,7 @@ from hfr_config import (
     MIN_TRACK_LENGTH,
     MIN_TRACK_STRAIGHTNESS,
     RESULT_DIR,
+    SIGNAL_SCORE_MIN,
     SNR_QUANTILE,
     SNR_SCALE_DB,
     SPACE_SCALE_KM,
@@ -81,13 +84,48 @@ TRACK_SUMMARY_COLUMNS = [
 
 
 def select_strong_points(frame_table: pd.DataFrame) -> pd.DataFrame:
-    # 按帧执行信噪比和幅度自适应筛选
-    valid_table = frame_table.replace([np.inf, -np.inf], np.nan).dropna(subset=["snr", "amp", "x", "y", "velocity"])
+    # 按帧和距离分区执行信号强点筛选
+    valid_table = frame_table.replace([np.inf, -np.inf], np.nan).dropna(
+        subset=["snr", "amp", "x", "y", "velocity", "range"]
+    )
     if valid_table.empty:
         return valid_table
-    snr_threshold = valid_table["snr"].quantile(SNR_QUANTILE)
-    amp_threshold = valid_table["amp"].quantile(AMP_QUANTILE)
-    return valid_table[(valid_table["snr"] >= snr_threshold) & (valid_table["amp"] >= amp_threshold)].copy()
+
+    valid_table = valid_table.copy()
+    frame_snr_threshold = valid_table["snr"].quantile(SNR_QUANTILE)
+    frame_amp_threshold = valid_table["amp"].quantile(AMP_QUANTILE)
+    valid_table["local_snr_threshold"] = frame_snr_threshold
+    valid_table["local_amp_threshold"] = frame_amp_threshold
+
+    range_bin_count = min(LOCAL_RANGE_BIN_COUNT, max(1, len(valid_table) // LOCAL_RANGE_MIN_POINTS))
+    if range_bin_count > 1:
+        range_bins = pd.qcut(valid_table["range"], q=range_bin_count, duplicates="drop")
+        for _, range_group in valid_table.groupby(range_bins, observed=False):
+            # 更新距离分区阈值
+            if len(range_group) < LOCAL_RANGE_MIN_POINTS:
+                continue
+            local_snr_threshold = range_group["snr"].quantile(SNR_QUANTILE)
+            local_amp_threshold = range_group["amp"].quantile(AMP_QUANTILE)
+            valid_table.loc[range_group.index, "local_snr_threshold"] = min(
+                frame_snr_threshold,
+                local_snr_threshold,
+            )
+            valid_table.loc[range_group.index, "local_amp_threshold"] = min(
+                frame_amp_threshold,
+                local_amp_threshold,
+            )
+
+    valid_table["snr_rank"] = valid_table["snr"].rank(pct=True)
+    valid_table["amp_rank"] = valid_table["amp"].rank(pct=True)
+    valid_table["signal_score"] = valid_table["snr_rank"] + valid_table["amp_rank"]
+
+    local_signal_mask = (
+        (valid_table["snr"] >= valid_table["local_snr_threshold"])
+        & (valid_table["amp"] >= valid_table["local_amp_threshold"])
+    )
+    combined_signal_mask = valid_table["signal_score"] >= SIGNAL_SCORE_MIN
+    strong_table = valid_table[local_signal_mask | combined_signal_mask].copy()
+    return strong_table
 
 
 def build_cluster_features(point_table: pd.DataFrame) -> np.ndarray:
