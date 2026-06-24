@@ -105,16 +105,37 @@ def build_time_review_lines(frame_summary: pd.DataFrame) -> list[str]:
     ]
 
 
+def build_metric_review_lines(
+    cluster_table: pd.DataFrame,
+    track_table: pd.DataFrame,
+    confirmed_tracks: pd.DataFrame,
+) -> list[str]:
+    # 生成无监督评价指标说明
+    track_count = track_table["track_id"].nunique() if not track_table.empty else 0
+    confirmed_track_count = confirmed_tracks["track_id"].nunique() if not confirmed_tracks.empty else 0
+    return [
+        "## 评价指标说明",
+        "",
+        "由于当前数据没有 AIS 真值或人工标注，不能计算严格意义上的准确率、召回率和 F1 值。",
+        "本实验采用无监督质量评价：候选数量、连续帧数、直线性、相邻帧最大跳变和平均信噪比。",
+        f"筛选流程从 {len(cluster_table)} 个候选簇形成 {track_count} 条候选航迹，最终保留 {confirmed_track_count} 条质量确认航迹。",
+        "若后续获得 AIS 或人工标注，才可以进一步计算检测率、虚警率和航迹误差。",
+        "",
+    ]
+
+
 def build_analysis_text() -> str:
     # 生成实验结果分析正文
     data_summary = pd.read_csv(TABLE_DIR / "data_summary.csv")
     frame_summary = pd.read_csv(TABLE_DIR / "frame_summary.csv")
     cluster_table = pd.read_csv(RESULT_DIR / "candidate_clusters.csv")
+    track_table = pd.read_csv(RESULT_DIR / "candidate_tracks.csv")
     confirmed_tracks = pd.read_csv(RESULT_DIR / "confirmed_tracks.csv")
     track_summary = pd.read_csv(RESULT_DIR / "track_summary.csv")
     display_summary = build_display_summary(track_summary)
     track_review_lines = build_track_review_lines(display_summary)
     time_review_lines = build_time_review_lines(frame_summary)
+    metric_review_lines = build_metric_review_lines(cluster_table, track_table, confirmed_tracks)
     confirmed_track_count = confirmed_tracks["track_id"].nunique() if "track_id" in confirmed_tracks else 0
 
     lines = [
@@ -131,6 +152,7 @@ def build_analysis_text() -> str:
         f"再通过相邻帧最近邻关联、最小持续帧数和形态质量约束，得到 {confirmed_track_count} 条疑似目标航迹。",
         "",
         *time_review_lines,
+        *metric_review_lines,
         "## 航迹质量审查",
         "",
         *track_review_lines,
@@ -139,8 +161,10 @@ def build_analysis_text() -> str:
         "",
         "- `图1_点迹空间密度`：展示全部点迹在平面坐标中的空间密度，用于说明观测区域和点迹背景分布。",
         "- `图2_点迹空间分布`：展示全部点迹的散点形态，用于辅助理解空间覆盖范围和离散点迹结构。",
-        "- `图3_确认航迹`：展示质量确认后 T30 航迹在第41至46帧之间的候选中心移动。",
-        "- `图4_单帧候选检测`：展示第42帧的原始点迹、候选点和候选簇中心，用于说明单帧检测流程。",
+        "- `图3_多帧候选检测`：展示确认航迹中的四个代表帧，说明每帧候选点和候选簇如何形成。",
+        "- `图4_确认航迹`：展示质量确认后 T30 航迹在第41至46帧之间的候选中心移动。",
+        "- `图5_候选筛选数量评价`：展示候选簇、候选航迹、长度达标航迹和质量确认航迹的数量变化。",
+        "- `图6_航迹质量评价`：展示长度达标候选航迹的直线性和相邻帧最大跳变。",
         "",
         "## 结果边界",
         "",
