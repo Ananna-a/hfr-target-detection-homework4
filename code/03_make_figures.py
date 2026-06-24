@@ -173,16 +173,18 @@ def get_track_frame_ids(confirmed_tracks: pd.DataFrame) -> list[int]:
     if confirmed_tracks.empty:
         return [DISPLAY_FRAME_ID]
     selected_frames = []
-    for _, track_group in confirmed_tracks.sort_values(["track_id", "frame_idx"]).groupby("track_id"):
+    track_groups = list(confirmed_tracks.sort_values(["track_id", "frame_idx"]).groupby("track_id"))
+    for _, track_group in track_groups:
+        # 优先展示每条确认航迹的起始帧
         track_frames = track_group["frame_idx"].astype(int).sort_values().unique().tolist()
         selected_frames.append(track_frames[0])
-        if len(track_frames) > 1:
-            selected_frames.append(track_frames[-1])
+    if len(selected_frames) < MULTI_FRAME_PANEL_COUNT:
+        # 剩余位置展示最长确认航迹的结束帧
+        longest_track = max(track_groups, key=lambda item: len(item[1]))[1]
+        longest_frames = longest_track["frame_idx"].astype(int).sort_values().unique().tolist()
+        selected_frames.append(longest_frames[-1])
     unique_frames = sorted(set(selected_frames))
-    if len(unique_frames) <= MULTI_FRAME_PANEL_COUNT:
-        return unique_frames
-    frame_indices = np.linspace(0, len(unique_frames) - 1, MULTI_FRAME_PANEL_COUNT).round().astype(int)
-    return [unique_frames[frame_index] for frame_index in frame_indices]
+    return unique_frames[:MULTI_FRAME_PANEL_COUNT]
 
 
 def get_multi_frame_view_limits(

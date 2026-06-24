@@ -19,6 +19,7 @@
 \usepackage{fancyhdr}
 \usepackage{tocloft}
 \usepackage{hyperref}
+\usepackage{listings}
 
 % 加载流程图组件
 \usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric}
@@ -40,6 +41,42 @@
 \setlength{\parindent}{2em}
 \setlength{\parskip}{0pt}
 \setlist{nosep,leftmargin=2.5em}
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue}\bfseries,
+  commentstyle=\color{gray},
+  stringstyle=\color{red},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  stepnumber=1,
+  numbersep=5pt,
+  backgroundcolor=\color{white},
+  showspaces=false,
+  showstringspaces=false,
+  showtabs=false,
+  frame=single,
+  rulecolor=\color{black},
+  tabsize=4,
+  captionpos=b,
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true,
+  escapeinside={\%*}{*)},
+  xleftmargin=2em,
+  xrightmargin=2em,
+  aboveskip=1em,
+  belowskip=1em
+}
+
+\lstdefinestyle{PythonStyle}{
+  language=Python,
+  keywordstyle=\color{blue}\bfseries,
+  commentstyle=\color{green!60!black},
+  stringstyle=\color{orange},
+  breaklines=true,
+  breakatwhitespace=false
+}
 
 % 设置章节标题格式
 \ctexset{
@@ -215,7 +252,7 @@
   \label{fig:radar_pipeline}
 \end{figure}
 
-需要说明的是，本次实验使用的 \texttt{HFRData.mat} 已经不是最底层的原始回波或距离--多普勒谱数据，而是经过雷达前端初步处理后的点迹数据。因此，本文的重点不是重新实现海杂波抑制、射频干扰抑制、电离层杂波抑制和谱级 CFAR 检测，而是在已有点迹基础上继续进行目标候选筛选、空间速度聚类和多帧连续性确认。
+需要说明的是，本次实验使用的 \texttt{HFRData.mat} 已经不是最底层的原始回波或距离--多普勒谱数据，而是雷达系统处理后输出的点迹级数据。数据中保留了每个点迹的位置、速度、幅度和信噪比等字段，但不能据此反推出完整的谱级杂波抑制或 CFAR 检测过程。因此，本文的重点不是重新实现海杂波抑制、射频干扰抑制、电离层杂波抑制和谱级 CFAR 检测，而是在已有点迹基础上继续进行目标候选筛选、空间速度聚类和多帧连续性确认。
 
 \subsection{技术特点}
 
@@ -284,7 +321,7 @@
 
 \subsubsection{自适应强点筛选}
 
-单帧强点筛选是后续聚类和关联的基础。若直接用全帧统一阈值，容易在背景较弱的区域漏掉可疑点；若简单放松全局阈值，又会显著增加杂波候选。因此，本文采用“全局阈值 + 距离分区局部修正 + 综合信号评分”的折中方案。
+单帧强点筛选是后续聚类和关联的基础。数据中的信噪比可理解为点迹相对于背景噪声或杂波的强弱估计，它是点迹质量指标，而不是目标真实性标签。若直接用固定 dB 阈值，容易受到帧间背景起伏和距离衰减影响；若简单放松全局阈值，又会显著增加杂波候选。因此，本文采用“全局分位阈值 + 距离分区局部修正 + 综合信号评分”的折中方案，在每帧内部保留相对更强的点迹，再交给聚类和多帧关联继续判别。
 
 设第 \(k\) 帧中第 \(i\) 个点迹的信噪比和幅度分别为 \(\mathrm{snr}_{k,i}\) 和 \(A_{k,i}\)。首先按每帧计算全局分位阈值
 \begin{equation}
@@ -461,17 +498,18 @@ Kalman 预测同时传播状态协方差，记预测观测为 \(\hat{\mathbf{z}}
 
 \subsubsection{候选检测与确认航迹}
 
-在完成强点筛选后，需要先观察单帧内候选簇是否能够稳定出现。图 \ref{fig:multi_frame_detection} 选取了最终确认航迹相关的 4 个代表帧，展示从原始点迹、候选点到候选中心的单帧检测结果。每个子图采用相同坐标范围，因此可以直接比较候选簇在不同帧之间的位置变化。
+在完成强点筛选后，需要先观察单帧内候选簇是否能够稳定出现。图 \ref{fig:multi_frame_detection} 选取了最终确认航迹相关的 4 个代表帧，其中 F13 对应 T13，F27 对应 T20，F41 和 F49 对应 T36 的起始与末端阶段。图中展示了从原始点迹、候选点到候选中心的单帧检测结果，每个子图采用相同坐标范围，因此可以直接比较候选簇在不同帧之间的位置变化。
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.72\textwidth]{图3_多帧候选检测.png}
+  \includegraphics[width=0.8\textwidth]{图3_多帧候选检测.png}
   \caption{多帧候选检测结果}
   \label{fig:multi_frame_detection}
 \end{figure}
 
-由图 \ref{fig:multi_frame_detection} 可见，候选点并不是在整幅观测区域内随机保留，而是在若干局部位置形成相对紧凑的小簇。对于 T20 相关帧，候选中心主要出现在 \(y\approx 25\)--28 km 附近；对于 T36 相关帧，候选中心分布在 \(y\approx 9\)--12 km 附近，并通过断帧重连形成更长的连续候选链。单帧候选只能说明该帧存在可疑点簇，还不能直接称为航迹，必须继续进行多帧关联。
+由图 \ref{fig:multi_frame_detection} 可见，候选点并不是在整幅观测区域内随机保留，而是在若干局部位置形成相对紧凑的小簇。F13 中与 T13 对应的候选中心位于 \(y\approx 28\ \mathrm{km}\)；F27 中与 T20 对应的候选中心位于 \(y\approx 27\ \mathrm{km}\)；F41 和 F49 中与 T36 对应的候选中心由 \(x\approx -34\ \mathrm{km},y\approx 9\ \mathrm{km}\) 移动到 \(x\approx -30\ \mathrm{km},y\approx 11\ \mathrm{km}\)。同一帧中还可能存在其他候选簇，因此单帧候选只能说明该帧存在可疑点簇，还不能直接称为航迹，必须继续进行多帧关联。
 
+\newpage
 为了判断这些单帧候选在全局空间中的相对位置，图 \ref{fig:global_tracks} 将全部候选簇中心和最终确认航迹叠加到全局点迹背景上。这样可以同时看到背景点迹、候选簇和确认航迹之间的关系。
 
 \begin{figure}[H]
@@ -487,7 +525,7 @@ Kalman 预测同时传播状态协方差，记预测观测为 \(\hat{\mathbf{z}}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.90\textwidth]{图5_确认航迹局部放大.png}
+  \includegraphics[width=1.0\textwidth]{图5_确认航迹局部放大.png}
   \caption{确认航迹局部放大}
   \label{fig:confirmed_tracks}
 \end{figure}
@@ -585,5 +623,93 @@ DBSCAN 聚类邻域对结果更敏感。当 \(\varepsilon=0.95\) 时，候选簇
 本实验也说明，参数选择需要在漏检和虚警之间折中。过严的信噪比和幅度筛选会忽略局部弱信号区域，过松的筛选又会造成候选簇数量膨胀并增加误关联。通过敏感性分析可以看到，距离分区补偿比简单放松全局阈值更稳健，能够适当补充候选而不破坏最终质量确认结果。
 
 在方法边界方面，本文没有将结果包装成“准确率”或“真实目标确认”，而是采用无监督质量指标解释结果。当没有 AIS 或人工标注作为真值时，算法输出只能说明候选链在当前规则下满足连续性和形态质量，不能证明其一定是船舶目标。后续可加入概率数据关联、多假设跟踪、AIS 验证和原始谱级检测，以提升工程可用性。
+
+\appendix
+\section{程序文件与关键代码说明}
+
+本次实验的程序按“配置、数据准备、检测关联、结果分析、绘图和敏感性分析”划分。各文件的主要作用如表 \ref{tab:code_files} 所示。
+
+\begin{table}[H]
+  \centering
+  \caption{主要程序文件说明}
+  \label{tab:code_files}
+  \small
+  \begin{tabularx}{\textwidth}{lX}
+    \toprule
+    文件 & 作用 \\
+    \midrule
+    \texttt{hfr\_config.py} & 集中定义数据路径、输出目录、绘图风格和主要算法参数，包括信号筛选分位数、DBSCAN 聚类参数、Kalman 波门、航迹长度和质量确认阈值。 \\
+    \texttt{01\_prepare\_data.py} & 读取 \texttt{HFRData.mat}，将各帧结构化点迹整理为表格，清洗无效信噪比和缺失字段，并输出点迹统计表。 \\
+    \texttt{02\_detect\_and\_track.py} & 完成核心检测与航迹关联流程，包括自适应强点筛选、DBSCAN 候选簇提取、候选簇加权中心计算、Kalman 预测关联和航迹质量确认。 \\
+    \texttt{03\_make\_figures.py} & 读取中间结果并绘制报告主图，包括点迹空间分布、多帧候选检测、候选簇与确认航迹、质量评价图。 \\
+    \texttt{04\_analyze\_results.py} & 汇总数据规模、帧时间、候选数量和航迹质量指标，自动生成实验结果分析 Markdown 文档，辅助检查报告文字与输出数据是否一致。 \\
+    \texttt{05\_sensitivity\_analysis.py} & 分阶段改变筛选、聚类、关联、长度和质量确认参数，生成敏感性分析表，用于评估最终参数是否过严或过松。 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+其中，核心算法主要集中在 \texttt{02\_detect\_and\_track.py}。该文件依次实现四个关键模块：第一，强点筛选模块按帧计算信噪比和幅度分位阈值，再按距离分区修正局部门限；第二，候选聚类模块将空间、速度、信噪比和幅度统一到可比较尺度后进行 DBSCAN 聚类，并用信噪比和幅度加权计算候选簇中心；第三，航迹关联模块在候选簇层面执行常速 Kalman 预测、马氏距离波门和最近邻关联；第四，质量确认模块根据持续帧数、直线性、步长和转向角筛选最终疑似航迹。
+
+为体现核心处理逻辑，下面列出部分关键源码片段。代码片段 \ref{code:strong_filter} 展示了单帧强点筛选中的局部阈值与综合评分逻辑。
+
+\begin{lstlisting}[style=PythonStyle,caption={强点筛选核心代码},label={code:strong_filter}]
+# 计算单帧信噪比和幅度分位阈值
+frame_snr_threshold = valid_table["snr"].quantile(SNR_QUANTILE)
+frame_amp_threshold = valid_table["amp"].quantile(AMP_QUANTILE)
+# 初始化每个点迹的局部筛选门限
+valid_table["local_snr_threshold"] = frame_snr_threshold
+valid_table["local_amp_threshold"] = frame_amp_threshold
+# 计算点迹的综合信号评分
+valid_table["snr_rank"] = valid_table["snr"].rank(pct=True)
+valid_table["amp_rank"] = valid_table["amp"].rank(pct=True)
+valid_table["signal_score"] = valid_table["snr_rank"] + valid_table["amp_rank"]
+# 标记同时满足局部信噪比和幅度条件的点迹
+local_signal_mask = (
+    (valid_table["snr"] >= valid_table["local_snr_threshold"])
+    & (valid_table["amp"] >= valid_table["local_amp_threshold"])
+)
+# 保留局部门限或综合评分达标的强点
+combined_signal_mask = valid_table["signal_score"] >= SIGNAL_SCORE_MIN
+strong_table = valid_table[local_signal_mask | combined_signal_mask].copy()
+\end{lstlisting}
+
+代码片段 \ref{code:track_gate} 展示了候选簇关联时同时使用马氏距离、空间距离、速度差和方向一致性约束。
+
+\begin{lstlisting}[style=PythonStyle,caption={候选簇关联门限代码},label={code:track_gate}]
+# 计算候选簇到预测状态的统计距离
+distance = mahalanobis_distance(candidate_row, predicted_state, predicted_covariance)
+# 计算候选簇到预测位置的空间距离
+spatial_distance = candidate_distance(candidate_row, predicted_state)
+# 计算径向速度差和矢量速度差
+velocity_diff = abs(float(candidate_row["mean_velocity"] - track_state["last_velocity"]))
+vector_velocity_diff = np.hypot(
+    float(candidate_row["mean_vx"] - track_state["last_vx"]),
+    float(candidate_row["mean_vy"] - track_state["last_vy"]),
+)
+# 同时通过距离、速度和方向门限时更新最近邻
+if (
+    distance <= best_distsance
+    and spatial_distance <= MAX_LINK_DISTANCE_KM
+    and velocity_diff <= MAX_VELOCITY_DIFF_KMH
+    and vector_velocity_diff <= MAX_VECTOR_VELOCITY_DIFF_KMH
+    and is_direction_consistent(candidate_row, track_state)
+):
+    best_index = candidate_index
+    best_distance = distance
+\end{lstlisting}
+
+代码片段 \ref{code:quality_filter} 展示了最终质量确认使用的长度、直线性和步长约束。
+
+\begin{lstlisting}[style=PythonStyle,caption={航迹质量确认代码},label={code:quality_filter}]
+# 按持续长度、直线性和步长约束筛选确认航迹
+qualified_track_ids = track_summary[
+    (track_summary["frame_count"] >= MIN_TRACK_LENGTH)
+    & (track_summary["straightness"] >= MIN_TRACK_STRAIGHTNESS)
+    & (track_summary["max_step"] <= MAX_TRACK_STEP_KM)
+    & (track_summary["mean_step"] <= MAX_MEAN_TRACK_STEP_KM)
+]["track_id"]
+\end{lstlisting}
+
+程序运行后，中间点迹表保存在 \texttt{report/tables} 目录，候选簇、候选航迹、确认航迹和敏感性分析结果保存在 \texttt{report/results} 目录，报告插图保存在 \texttt{report/figures} 目录。这样可以保证数据准备、算法处理、作图和报告撰写之间有明确的数据接口。
 
 \end{document}
