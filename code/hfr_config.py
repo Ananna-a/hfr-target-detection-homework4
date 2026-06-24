@@ -46,8 +46,8 @@ NEUTRAL_MID = "#767676"
 NEUTRAL_DARK = "#4D4D4D"
 # Nature风格黑色来源：关键线条
 NEUTRAL_BLACK = "#272727"
-# 航迹颜色来源：低饱和色系区分确认航迹
-TRACK_COLOR_LIST = ["#0F4D92", "#42949E", "#9A4D8E", "#B64342"]
+# 航迹颜色来源：避开候选簇蓝色以区分确认航迹
+TRACK_COLOR_LIST = ["#B64342", "#2F8F5B", "#9A4D8E", "#0F4D92"]
 
 # 信噪比分位阈值来源：保留每帧高信噪比点迹
 SNR_QUANTILE = 0.85
@@ -81,8 +81,8 @@ MIN_DIRECTION_STEP_KM = 0.25
 MAX_DIRECTION_CHANGE_DEG = 125.0
 # 航迹最大断帧来源：本实验只关联相邻帧候选
 MAX_TRACK_GAP_FRAMES = 1
-# 确认航迹长度来源：过滤短寿命候选
-MIN_TRACK_LENGTH = 5
+# 确认航迹长度来源：保留至少三分钟连续出现的候选
+MIN_TRACK_LENGTH = 4
 # 确认航迹直线性来源：过滤往返跳动明显的候选链
 MIN_TRACK_STRAIGHTNESS = 0.60
 # 确认航迹最大步长来源：过滤相邻帧中心突跳

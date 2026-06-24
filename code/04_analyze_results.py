@@ -148,8 +148,8 @@ def build_analysis_text() -> str:
     confirmed_track_count = confirmed_tracks["track_id"].nunique() if "track_id" in confirmed_tracks else 0
     confirmed_track_label = "确认航迹"
     if not confirmed_tracks.empty and "track_id" in confirmed_tracks:
-        confirmed_track_id = int(confirmed_tracks["track_id"].iloc[0])
-        confirmed_track_label = f"T{confirmed_track_id}"
+        confirmed_track_ids = sorted(confirmed_tracks["track_id"].astype(int).unique().tolist())
+        confirmed_track_label = "、".join(f"T{track_id}" for track_id in confirmed_track_ids)
 
     lines = [
         "# 实验结果分析",

@@ -23,6 +23,7 @@ from hfr_config import (
     RESULT_DIR,
     TABLE_DIR,
     MIN_DIRECTION_STEP_KM,
+    TRACK_COLOR_LIST,
     configure_plot_style,
     ensure_output_dirs,
     load_point_table,
@@ -149,18 +150,17 @@ def get_track_frame_ids(confirmed_tracks: pd.DataFrame) -> list[int]:
     # 选择确认航迹中的代表帧
     if confirmed_tracks.empty:
         return [DISPLAY_FRAME_ID]
-    track_id = int(confirmed_tracks["track_id"].iloc[0])
-    track_frames = (
-        confirmed_tracks[confirmed_tracks["track_id"] == track_id]["frame_idx"]
-        .astype(int)
-        .sort_values()
-        .unique()
-        .tolist()
-    )
-    if len(track_frames) <= MULTI_FRAME_PANEL_COUNT:
-        return track_frames
-    frame_indices = np.linspace(0, len(track_frames) - 1, MULTI_FRAME_PANEL_COUNT).round().astype(int)
-    return [track_frames[frame_index] for frame_index in frame_indices]
+    selected_frames = []
+    for _, track_group in confirmed_tracks.sort_values(["track_id", "frame_idx"]).groupby("track_id"):
+        track_frames = track_group["frame_idx"].astype(int).sort_values().unique().tolist()
+        selected_frames.append(track_frames[0])
+        if len(track_frames) > 1:
+            selected_frames.append(track_frames[-1])
+    unique_frames = sorted(set(selected_frames))
+    if len(unique_frames) <= MULTI_FRAME_PANEL_COUNT:
+        return unique_frames
+    frame_indices = np.linspace(0, len(unique_frames) - 1, MULTI_FRAME_PANEL_COUNT).round().astype(int)
+    return [unique_frames[frame_index] for frame_index in frame_indices]
 
 
 def draw_frame_detection(
@@ -295,17 +295,20 @@ def plot_global_candidate_clusters(
         label="候选簇中心",
     )
     if not confirmed_tracks.empty:
-        track_id = int(confirmed_tracks["track_id"].iloc[0])
-        track_table = confirmed_tracks[confirmed_tracks["track_id"] == track_id].sort_values("frame_idx")
-        axis.plot(
-            track_table["center_x"],
-            track_table["center_y"],
-            color=RED_STRONG,
-            linewidth=GLOBAL_TRACK_LINE_WIDTH,
-            marker="o",
-            markersize=3.4,
-            label=f"T{track_id}确认航迹",
-        )
+        for track_order, (track_id, track_group) in enumerate(confirmed_tracks.groupby("track_id")):
+            # 绘制每条确认航迹
+            track_table = track_group.sort_values("frame_idx")
+            track_color = TRACK_COLOR_LIST[track_order % len(TRACK_COLOR_LIST)]
+            axis.plot(
+                track_table["center_x"],
+                track_table["center_y"],
+                color=track_color,
+                linewidth=GLOBAL_TRACK_LINE_WIDTH + 0.35,
+                marker="o",
+                markersize=4.0,
+                zorder=8,
+                label=f"T{int(track_id)}确认航迹",
+            )
     axis.set_title("候选簇空间分布与确认航迹", pad=5)
     set_equal_axis(axis)
     axis.legend(loc="upper left", frameon=False, handletextpad=0.45)
@@ -335,66 +338,75 @@ def plot_confirmed_track(
     if confirmed_tracks.empty:
         return
 
-    track_id = int(confirmed_tracks["track_id"].iloc[0])
-    track_table = confirmed_tracks[confirmed_tracks["track_id"] == track_id].sort_values("frame_idx").copy()
-    track_table["frame_idx"] = track_table["frame_idx"].astype(int)
-    track_table = track_table.merge(frame_summary[["frame_idx", "frame_time"]], on="frame_idx", how="left")
-    frame_ids = track_table["frame_idx"].tolist()
-    background_table = point_table[point_table["frame_idx"].isin(frame_ids)]
+    track_groups = list(confirmed_tracks.sort_values(["track_id", "frame_idx"]).groupby("track_id"))
+    figure, axes = plt.subplots(
+        nrows=1,
+        ncols=len(track_groups),
+        figsize=(4.9 * len(track_groups), 4.1),
+        constrained_layout=True,
+    )
+    flat_axes = np.atleast_1d(axes)
+    for track_order, ((track_id, track_group), axis) in enumerate(zip(track_groups, flat_axes)):
+        # 绘制单条确认航迹局部图
+        track_table = track_group.sort_values("frame_idx").copy()
+        track_table["frame_idx"] = track_table["frame_idx"].astype(int)
+        track_table = track_table.merge(frame_summary[["frame_idx", "frame_time"]], on="frame_idx", how="left")
+        frame_ids = track_table["frame_idx"].tolist()
+        background_table = point_table[point_table["frame_idx"].isin(frame_ids)]
+        track_color = TRACK_COLOR_LIST[track_order % len(TRACK_COLOR_LIST)]
 
-    figure, axis = plt.subplots(figsize=(4.9, 4.1), constrained_layout=True)
-    axis.scatter(
-        background_table["x"],
-        background_table["y"],
-        s=TRACK_BACKGROUND_POINT_SIZE,
-        color=NEUTRAL_DARK,
-        alpha=TRACK_BACKGROUND_ALPHA,
-        linewidths=0,
-        label="对应帧点迹",
-    )
-    axis.plot(
-        track_table["center_x"],
-        track_table["center_y"],
-        color=BLUE_MAIN,
-        linewidth=TRACK_LINE_WIDTH,
-        marker="o",
-        markersize=4.2,
-        label=f"T{track_id}航迹中心",
-    )
-    for start_row, end_row in zip(track_table.itertuples(), track_table.iloc[1:].itertuples()):
-        # 绘制航迹方向箭头
-        axis.annotate(
-            "",
-            xy=(end_row.center_x, end_row.center_y),
-            xytext=(start_row.center_x, start_row.center_y),
-            arrowprops={"arrowstyle": "->", "color": BLUE_MAIN, "lw": 0.8, "shrinkA": 5, "shrinkB": 5},
+        axis.scatter(
+            background_table["x"],
+            background_table["y"],
+            s=TRACK_BACKGROUND_POINT_SIZE,
+            color=NEUTRAL_DARK,
+            alpha=TRACK_BACKGROUND_ALPHA,
+            linewidths=0,
+            label="对应帧点迹",
         )
-    axis.scatter(
-        [track_table["center_x"].iloc[0]],
-        [track_table["center_y"].iloc[0]],
-        s=TRACK_POINT_SIZE,
-        color=RED_STRONG,
-        linewidths=0,
-        label="起点",
-        zorder=6,
-    )
-    axis.scatter(
-        [track_table["center_x"].iloc[-1]],
-        [track_table["center_y"].iloc[-1]],
-        s=TRACK_POINT_SIZE,
-        color=NEUTRAL_BLACK,
-        linewidths=0,
-        label="终点",
-        zorder=6,
-    )
+        axis.plot(
+            track_table["center_x"],
+            track_table["center_y"],
+            color=track_color,
+            linewidth=TRACK_LINE_WIDTH,
+            marker="o",
+            markersize=4.2,
+            label=f"T{int(track_id)}航迹中心",
+        )
+        for start_row, end_row in zip(track_table.itertuples(), track_table.iloc[1:].itertuples()):
+            # 绘制航迹方向箭头
+            axis.annotate(
+                "",
+                xy=(end_row.center_x, end_row.center_y),
+                xytext=(start_row.center_x, start_row.center_y),
+                arrowprops={"arrowstyle": "->", "color": track_color, "lw": 0.8, "shrinkA": 5, "shrinkB": 5},
+            )
+        axis.scatter(
+            [track_table["center_x"].iloc[0]],
+            [track_table["center_y"].iloc[0]],
+            s=TRACK_POINT_SIZE,
+            color=RED_STRONG,
+            linewidths=0,
+            label="起点",
+            zorder=6,
+        )
+        axis.scatter(
+            [track_table["center_x"].iloc[-1]],
+            [track_table["center_y"].iloc[-1]],
+            s=TRACK_POINT_SIZE,
+            color=NEUTRAL_BLACK,
+            linewidths=0,
+            label="终点",
+            zorder=6,
+        )
 
-    start_time = str(track_table["frame_time"].iloc[0]).split()[-1]
-    end_time = str(track_table["frame_time"].iloc[-1]).split()[-1]
-    title_text = f"T{track_id}确认航迹（F{frame_ids[0]}-F{frame_ids[-1]}，{start_time}-{end_time}）"
-    axis.set_title(title_text, pad=5)
-    set_equal_axis(axis)
-    set_track_view(axis, track_table)
-    axis.legend(loc="upper left", frameon=False, handletextpad=0.45)
+        start_time = str(track_table["frame_time"].iloc[0]).split()[-1]
+        end_time = str(track_table["frame_time"].iloc[-1]).split()[-1]
+        title_text = f"T{int(track_id)}（F{frame_ids[0]}-F{frame_ids[-1]}，{start_time}-{end_time}）"
+        axis.set_title(title_text, pad=5)
+        set_equal_axis(axis)
+        set_track_view(axis, track_table)
+        axis.legend(loc="upper left", frameon=False, handletextpad=0.45)
     save_figure(figure, "图5_确认航迹局部放大.png")
 
 
