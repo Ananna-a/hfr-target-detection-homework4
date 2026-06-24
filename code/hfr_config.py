@@ -97,7 +97,7 @@ MAX_VECTOR_VELOCITY_DIFF_KMH = 8.0
 MIN_DIRECTION_STEP_KM = 0.25
 # 航迹方向变化阈值来源：过滤相邻帧明显反向跳接
 MAX_DIRECTION_CHANGE_DEG = 125.0
-# 航迹最大断帧来源：本实验只关联相邻帧候选
+# 航迹最大断帧来源：允许候选短暂缺失后重连
 MAX_TRACK_GAP_FRAMES = 1
 # 确认航迹长度来源：保留至少三分钟连续出现的候选
 MIN_TRACK_LENGTH = 4
