@@ -9,6 +9,10 @@ from hfr_config import (
     AMP_SCALE,
     DBSCAN_EPS,
     DBSCAN_MIN_SAMPLES,
+    KALMAN_ACCEL_STD_KMH2,
+    KALMAN_GATE_THRESHOLD,
+    KALMAN_INITIAL_VELOCITY_STD_KMH,
+    KALMAN_POSITION_NOISE_KM,
     LOCAL_RANGE_BIN_COUNT,
     LOCAL_RANGE_MIN_POINTS,
     MAX_DIRECTION_CHANGE_DEG,
@@ -87,6 +91,20 @@ TRACK_SUMMARY_COLUMNS = [
 MAX_TRACK_FRAME_STEP = MAX_TRACK_GAP_FRAMES + 1
 # 加权中心基准来源：保证权重为正
 CLUSTER_WEIGHT_EPS = 1e-6
+# 状态向量维度来源：常速模型[x,vx,y,vy]
+STATE_DIMENSION = 4
+# 观测向量维度来源：候选簇中心[x,y]
+MEASUREMENT_DIMENSION = 2
+# 观测矩阵来源：只观测位置
+OBSERVATION_MATRIX = np.array(
+    [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+    ],
+    dtype=float,
+)
+# 单位矩阵来源：Kalman协方差更新
+STATE_IDENTITY = np.eye(STATE_DIMENSION)
 
 
 def calculate_signal_weights(cluster_table: pd.DataFrame) -> np.ndarray:
@@ -105,6 +123,103 @@ def weighted_mean(cluster_table: pd.DataFrame, column_name: str, weights: np.nda
     # 计算指定字段加权均值
     column_values = cluster_table[column_name].to_numpy(dtype=float)
     return float(np.average(column_values, weights=weights))
+
+
+def build_transition_matrix(frame_step: int) -> np.ndarray:
+    # 构造常速模型状态转移矩阵
+    elapsed_hours = frame_step * TRACK_FRAME_INTERVAL_SECONDS / SECONDS_PER_HOUR
+    return np.array(
+        [
+            [1.0, elapsed_hours, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, elapsed_hours],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+
+def build_process_noise(frame_step: int) -> np.ndarray:
+    # 构造常速模型过程噪声矩阵
+    elapsed_hours = frame_step * TRACK_FRAME_INTERVAL_SECONDS / SECONDS_PER_HOUR
+    time_square = elapsed_hours**2
+    time_cube = elapsed_hours**3
+    time_fourth = elapsed_hours**4
+    base_noise = np.array(
+        [
+            [time_fourth / 4.0, time_cube / 2.0, 0.0, 0.0],
+            [time_cube / 2.0, time_square, 0.0, 0.0],
+            [0.0, 0.0, time_fourth / 4.0, time_cube / 2.0],
+            [0.0, 0.0, time_cube / 2.0, time_square],
+        ],
+        dtype=float,
+    )
+    return base_noise * (KALMAN_ACCEL_STD_KMH2**2)
+
+
+def build_measurement_noise() -> np.ndarray:
+    # 构造位置测量噪声矩阵
+    return np.diag([KALMAN_POSITION_NOISE_KM**2, KALMAN_POSITION_NOISE_KM**2])
+
+
+def initialize_track_state(candidate_row: pd.Series) -> tuple[np.ndarray, np.ndarray]:
+    # 初始化航迹状态和协方差
+    state_vector = np.array(
+        [
+            float(candidate_row["center_x"]),
+            float(candidate_row["mean_vx"]),
+            float(candidate_row["center_y"]),
+            float(candidate_row["mean_vy"]),
+        ],
+        dtype=float,
+    )
+    covariance_matrix = np.diag(
+        [
+            KALMAN_POSITION_NOISE_KM**2,
+            KALMAN_INITIAL_VELOCITY_STD_KMH**2,
+            KALMAN_POSITION_NOISE_KM**2,
+            KALMAN_INITIAL_VELOCITY_STD_KMH**2,
+        ]
+    )
+    return state_vector, covariance_matrix
+
+
+def predict_track_state(track_state: dict, frame_step: int) -> tuple[np.ndarray, np.ndarray]:
+    # 预测航迹状态和协方差
+    transition_matrix = build_transition_matrix(frame_step)
+    process_noise = build_process_noise(frame_step)
+    predicted_state = transition_matrix @ track_state["state_vector"]
+    predicted_covariance = transition_matrix @ track_state["covariance_matrix"] @ transition_matrix.T + process_noise
+    return predicted_state, predicted_covariance
+
+
+def update_track_state(
+    predicted_state: np.ndarray,
+    predicted_covariance: np.ndarray,
+    candidate_row: pd.Series,
+) -> tuple[np.ndarray, np.ndarray]:
+    # 使用候选中心更新Kalman状态
+    measurement_vector = np.array([candidate_row["center_x"], candidate_row["center_y"]], dtype=float)
+    measurement_noise = build_measurement_noise()
+    innovation = measurement_vector - OBSERVATION_MATRIX @ predicted_state
+    innovation_covariance = OBSERVATION_MATRIX @ predicted_covariance @ OBSERVATION_MATRIX.T + measurement_noise
+    kalman_gain = predicted_covariance @ OBSERVATION_MATRIX.T @ np.linalg.inv(innovation_covariance)
+    updated_state = predicted_state + kalman_gain @ innovation
+    updated_covariance = (STATE_IDENTITY - kalman_gain @ OBSERVATION_MATRIX) @ predicted_covariance
+    return updated_state, updated_covariance
+
+
+def mahalanobis_distance(
+    candidate_row: pd.Series,
+    predicted_state: np.ndarray,
+    predicted_covariance: np.ndarray,
+) -> float:
+    # 计算候选中心到预测位置的马氏距离
+    measurement_vector = np.array([candidate_row["center_x"], candidate_row["center_y"]], dtype=float)
+    measurement_noise = build_measurement_noise()
+    innovation = measurement_vector - OBSERVATION_MATRIX @ predicted_state
+    innovation_covariance = OBSERVATION_MATRIX @ predicted_covariance @ OBSERVATION_MATRIX.T + measurement_noise
+    return float(innovation.T @ np.linalg.inv(innovation_covariance) @ innovation)
 
 
 def select_strong_points(frame_table: pd.DataFrame) -> pd.DataFrame:
@@ -214,14 +329,10 @@ def detect_all_clusters(point_table: pd.DataFrame) -> tuple[pd.DataFrame, pd.Dat
     return strong_point_table, cluster_table
 
 
-def candidate_distance(candidate_row: pd.Series, track_state: dict) -> float:
-    # 计算候选簇与航迹预测位置距离
-    frame_step = int(candidate_row["frame_idx"] - track_state["last_frame"])
-    elapsed_hours = frame_step * TRACK_FRAME_INTERVAL_SECONDS / SECONDS_PER_HOUR
-    predicted_x = float(track_state["last_x"] + track_state["last_vx"] * elapsed_hours)
-    predicted_y = float(track_state["last_y"] + track_state["last_vy"] * elapsed_hours)
-    delta_x = float(candidate_row["center_x"] - predicted_x)
-    delta_y = float(candidate_row["center_y"] - predicted_y)
+def candidate_distance(candidate_row: pd.Series, predicted_state: np.ndarray) -> float:
+    # 计算候选簇与Kalman预测位置距离
+    delta_x = float(candidate_row["center_x"] - predicted_state[0])
+    delta_y = float(candidate_row["center_y"] - predicted_state[2])
     return float(np.hypot(delta_x, delta_y))
 
 
@@ -260,14 +371,21 @@ def is_direction_consistent(candidate_row: pd.Series, track_state: dict) -> bool
     return turn_angle <= MAX_DIRECTION_CHANGE_DEG
 
 
-def find_track_match(frame_candidates: pd.DataFrame, track_state: dict, used_indices: set) -> int | None:
-    # 选择当前航迹的最近邻候选
+def find_track_match(
+    frame_candidates: pd.DataFrame,
+    track_state: dict,
+    used_indices: set,
+    frame_step: int,
+) -> tuple[int | None, np.ndarray, np.ndarray]:
+    # 选择当前航迹的马氏距离最近邻候选
     best_index = None
-    best_distance = MAX_LINK_DISTANCE_KM
+    best_distance = KALMAN_GATE_THRESHOLD
+    predicted_state, predicted_covariance = predict_track_state(track_state, frame_step)
     for candidate_index, candidate_row in frame_candidates.iterrows():
         if candidate_index in used_indices:
             continue
-        distance = candidate_distance(candidate_row, track_state)
+        distance = mahalanobis_distance(candidate_row, predicted_state, predicted_covariance)
+        spatial_distance = candidate_distance(candidate_row, predicted_state)
         velocity_diff = abs(float(candidate_row["mean_velocity"] - track_state["last_velocity"]))
         vector_velocity_diff = np.hypot(
             float(candidate_row["mean_vx"] - track_state["last_vx"]),
@@ -275,13 +393,14 @@ def find_track_match(frame_candidates: pd.DataFrame, track_state: dict, used_ind
         )
         if (
             distance <= best_distance
+            and spatial_distance <= MAX_LINK_DISTANCE_KM
             and velocity_diff <= MAX_VELOCITY_DIFF_KMH
             and vector_velocity_diff <= MAX_VECTOR_VELOCITY_DIFF_KMH
             and is_direction_consistent(candidate_row, track_state)
         ):
             best_index = candidate_index
             best_distance = distance
-    return best_index
+    return best_index, predicted_state, predicted_covariance
 
 
 def link_tracks(cluster_table: pd.DataFrame) -> pd.DataFrame:
@@ -301,16 +420,28 @@ def link_tracks(cluster_table: pd.DataFrame) -> pd.DataFrame:
             frame_step = int(frame_idx - track_state["last_frame"])
             if frame_step < 1 or frame_step > MAX_TRACK_FRAME_STEP:
                 continue
-            best_index = find_track_match(frame_candidates, track_state, used_indices)
+            best_index, predicted_state, predicted_covariance = find_track_match(
+                frame_candidates,
+                track_state,
+                used_indices,
+                frame_step,
+            )
             if best_index is None:
                 continue
             matched_row = frame_candidates.loc[best_index].copy()
+            updated_state, updated_covariance = update_track_state(
+                predicted_state,
+                predicted_covariance,
+                matched_row,
+            )
             matched_row["track_id"] = track_state["track_id"]
             track_rows.append(matched_row)
             used_indices.add(best_index)
             track_state["previous_x"] = track_state["last_x"]
             track_state["previous_y"] = track_state["last_y"]
             track_state["last_frame"] = int(matched_row["frame_idx"])
+            track_state["state_vector"] = updated_state
+            track_state["covariance_matrix"] = updated_covariance
             track_state["last_x"] = float(matched_row["center_x"])
             track_state["last_y"] = float(matched_row["center_y"])
             track_state["last_velocity"] = float(matched_row["mean_velocity"])
@@ -323,10 +454,13 @@ def link_tracks(cluster_table: pd.DataFrame) -> pd.DataFrame:
             new_row = candidate_row.copy()
             new_row["track_id"] = next_track_id
             track_rows.append(new_row)
+            state_vector, covariance_matrix = initialize_track_state(candidate_row)
             active_tracks.append(
                 {
                     "track_id": next_track_id,
                     "last_frame": int(candidate_row["frame_idx"]),
+                    "state_vector": state_vector,
+                    "covariance_matrix": covariance_matrix,
                     "previous_x": None,
                     "previous_y": None,
                     "last_x": float(candidate_row["center_x"]),

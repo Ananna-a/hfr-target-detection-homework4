@@ -81,6 +81,14 @@ MAX_LINK_DISTANCE_KM = 5.0
 TRACK_FRAME_INTERVAL_SECONDS = 60.0
 # 小时换算来源：速度单位为km/h
 SECONDS_PER_HOUR = 3600.0
+# Kalman位置测量噪声来源：候选簇中心定位经验误差
+KALMAN_POSITION_NOISE_KM = 1.50
+# Kalman速度初始不确定度来源：候选簇速度估计波动
+KALMAN_INITIAL_VELOCITY_STD_KMH = 12.0
+# Kalman加速度噪声来源：海面目标短时机动经验尺度
+KALMAN_ACCEL_STD_KMH2 = 120.0
+# 马氏距离波门来源：二维卡方门限的保守取值
+KALMAN_GATE_THRESHOLD = 9.21
 # 航迹关联速度差来源：相邻帧径向速度最大允许差
 MAX_VELOCITY_DIFF_KMH = 15.0
 # 航迹关联速度矢量差来源：约束xy速度分量突变
