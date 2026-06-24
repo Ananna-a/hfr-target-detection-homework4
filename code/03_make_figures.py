@@ -41,7 +41,16 @@ CENTER_POINT_SIZE = 26
 VIEW_PADDING_KM = 6.0
 # 候选簇标注偏移来源：避免遮挡中心点
 CLUSTER_LABEL_OFFSET_POINTS = (5, 5)
-
+# 航迹帧号偏移来源：错开相邻帧号标注
+TRACK_LABEL_OFFSET_LIST = [(-15, -12), (6, -14), (8, 8), (8, -14), (14, 18), (26, 28)]
+# 航迹背景点大小来源：弱化局部原始点迹背景
+TRACK_BACKGROUND_POINT_SIZE = 10
+# 航迹中心点大小来源：突出每帧候选中心
+TRACK_POINT_SIZE = 34
+# 航迹线宽来源：报告缩放后保持可辨认
+TRACK_LINE_WIDTH = 1.4
+# 航迹视窗边距来源：保留起终点和帧号标注
+TRACK_VIEW_PADDING_KM = 7.0
 
 def read_result_table(file_name: str) -> pd.DataFrame:
     # 读取结果表
@@ -109,6 +118,88 @@ def get_candidate_points(frame_strong_points: pd.DataFrame, frame_clusters: pd.D
     # 提取通过聚类确认的候选点
     accepted_cluster_ids = set(frame_clusters["cluster_id"].astype(int).tolist())
     return frame_strong_points[frame_strong_points["cluster_id"].isin(accepted_cluster_ids)]
+
+
+def set_track_view(axis: plt.Axes, track_table: pd.DataFrame) -> None:
+    # 设置确认航迹图展示范围
+    x_min = track_table["center_x"].min() - TRACK_VIEW_PADDING_KM
+    x_max = track_table["center_x"].max() + TRACK_VIEW_PADDING_KM
+    y_min = track_table["center_y"].min() - TRACK_VIEW_PADDING_KM
+    y_max = track_table["center_y"].max() + TRACK_VIEW_PADDING_KM
+    axis.set_xlim(x_min, x_max)
+    axis.set_ylim(y_min, y_max)
+
+
+def plot_confirmed_track(point_table: pd.DataFrame, confirmed_tracks: pd.DataFrame, frame_summary: pd.DataFrame) -> None:
+    # 绘制确认航迹中心移动图
+    if confirmed_tracks.empty:
+        return
+
+    track_id = int(confirmed_tracks["track_id"].iloc[0])
+    track_table = confirmed_tracks[confirmed_tracks["track_id"] == track_id].sort_values("frame_idx").copy()
+    track_table["frame_idx"] = track_table["frame_idx"].astype(int)
+    track_table = track_table.merge(frame_summary[["frame_idx", "frame_time"]], on="frame_idx", how="left")
+    frame_ids = track_table["frame_idx"].tolist()
+    background_table = point_table[point_table["frame_idx"].isin(frame_ids)]
+
+    figure, axis = plt.subplots(figsize=(4.9, 4.1), constrained_layout=True)
+    axis.scatter(
+        background_table["x"],
+        background_table["y"],
+        s=TRACK_BACKGROUND_POINT_SIZE,
+        color=NEUTRAL_DARK,
+        alpha=0.22,
+        linewidths=0,
+        label="对应帧点迹",
+    )
+    axis.plot(
+        track_table["center_x"],
+        track_table["center_y"],
+        color=BLUE_MAIN,
+        linewidth=TRACK_LINE_WIDTH,
+        marker="o",
+        markersize=4.2,
+        label=f"T{track_id}航迹中心",
+    )
+    axis.scatter(
+        [track_table["center_x"].iloc[0]],
+        [track_table["center_y"].iloc[0]],
+        s=TRACK_POINT_SIZE,
+        color=RED_STRONG,
+        linewidths=0,
+        label="起点",
+        zorder=6,
+    )
+    axis.scatter(
+        [track_table["center_x"].iloc[-1]],
+        [track_table["center_y"].iloc[-1]],
+        s=TRACK_POINT_SIZE,
+        color=NEUTRAL_BLACK,
+        linewidths=0,
+        label="终点",
+        zorder=6,
+    )
+
+    for track_order, track_row in enumerate(track_table.itertuples()):
+        # 标注航迹帧号
+        label_offset = TRACK_LABEL_OFFSET_LIST[track_order % len(TRACK_LABEL_OFFSET_LIST)]
+        axis.annotate(
+            f"F{track_row.frame_idx}",
+            (track_row.center_x, track_row.center_y),
+            xytext=label_offset,
+            textcoords="offset points",
+            fontsize=6.8,
+            color=NEUTRAL_BLACK,
+        )
+
+    start_time = str(track_table["frame_time"].iloc[0]).split()[-1]
+    end_time = str(track_table["frame_time"].iloc[-1]).split()[-1]
+    title_text = f"T{track_id}确认航迹（F{frame_ids[0]}-F{frame_ids[-1]}，{start_time}-{end_time}）"
+    axis.set_title(title_text, pad=5)
+    set_equal_axis(axis)
+    set_track_view(axis, track_table)
+    axis.legend(loc="upper left", frameon=False, handletextpad=0.45)
+    save_figure(figure, "图3_确认航迹.png")
 
 
 def set_detection_view(axis: plt.Axes, frame_table: pd.DataFrame, frame_clusters: pd.DataFrame) -> None:
@@ -181,7 +272,7 @@ def plot_single_frame_detection(
     set_detection_view(axis, frame_table, frame_clusters)
     axis.scatter([], [], s=CENTER_POINT_SIZE, marker="o", color=RED_STRONG, label="候选中心")
     axis.legend(loc="upper right", frameon=False, handletextpad=0.45)
-    save_figure(figure, "图3_单帧候选检测.png")
+    save_figure(figure, "图4_单帧候选检测.png")
 
 
 def main():
@@ -194,10 +285,13 @@ def main():
     point_table = load_point_table()
     strong_point_table = pd.read_csv(TABLE_DIR / "strong_points.csv")
     cluster_table = read_result_table("candidate_clusters.csv")
+    confirmed_tracks = read_result_table("confirmed_tracks.csv")
+    frame_summary = pd.read_csv(TABLE_DIR / "frame_summary.csv")
 
-    # 生成三张单图
+    # 生成报告主图和过程图
     plot_spatial_density(point_table)
     plot_spatial_distribution(point_table)
+    plot_confirmed_track(point_table, confirmed_tracks, frame_summary)
     plot_single_frame_detection(point_table, strong_point_table, cluster_table)
 
     # 输出图片目录

@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -23,6 +24,12 @@ XY_Y_COL = 2
 XY_VY_COL = 3
 # 速度换算来源：1 m/s = 3.6 km/h
 KMH_PER_MPS = 3.6
+# 北京时间偏移来源：雷达头字段为本地年月日时分秒
+BEIJING_UTC_OFFSET_HOURS = 8
+# 帧时间时区来源：统一重建每帧时间戳
+FRAME_TIMEZONE = timezone(timedelta(hours=BEIJING_UTC_OFFSET_HOURS))
+# 帧时间文本格式来源：报告和表格展示
+FRAME_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 # 图片分辨率来源：报告插图清晰度要求
 FIGURE_DPI = 300
 # Nature风格蓝色来源：候选目标主强调色
@@ -136,18 +143,34 @@ def get_header_value(frame_struct: np.void, field_name: str) -> float:
     return float(np.asarray(header_struct[field_name]).ravel()[0])
 
 
+def get_header_datetime(frame_struct: np.void) -> datetime:
+    # 重建帧头年月日时分秒时间
+    year = int(get_header_value(frame_struct, "dyear"))
+    month = int(get_header_value(frame_struct, "dmonth"))
+    day = int(get_header_value(frame_struct, "dday"))
+    hour = int(get_header_value(frame_struct, "dhour"))
+    minute = int(get_header_value(frame_struct, "dminute"))
+    second = int(get_header_value(frame_struct, "dsec"))
+    return datetime(year, month, day, hour, minute, second, tzinfo=FRAME_TIMEZONE)
+
+
 def frame_to_dataframe(hfr_data: np.ndarray, frame_idx: int) -> pd.DataFrame:
     # 转换单帧点迹为表格
     frame_struct = get_frame_struct(hfr_data, frame_idx)
     xy_values = np.asarray(frame_struct["xy"], dtype=float)
     point_count = int(np.asarray(frame_struct["PlotCnt"]).ravel()[0])
-    unix_time = get_header_value(frame_struct, "unixtime")
+    raw_unixtime = get_header_value(frame_struct, "unixtime")
+    frame_datetime = get_header_datetime(frame_struct)
+    frame_timestamp = frame_datetime.timestamp()
+    frame_time_text = frame_datetime.strftime(FRAME_TIME_FORMAT)
     velocity_values = np.asarray(frame_struct["velocity"]).reshape(-1).astype(float)
 
     return pd.DataFrame(
         {
             "frame_idx": np.full(point_count, frame_idx + 1, dtype=int),
-            "time": np.full(point_count, unix_time, dtype=float),
+            "time": np.full(point_count, frame_timestamp, dtype=float),
+            "frame_time": np.full(point_count, frame_time_text),
+            "raw_unixtime": np.full(point_count, raw_unixtime, dtype=float),
             "id": np.asarray(frame_struct["id"]).reshape(-1).astype(int),
             "range": np.asarray(frame_struct["range"]).reshape(-1).astype(float),
             "velocity": velocity_values,

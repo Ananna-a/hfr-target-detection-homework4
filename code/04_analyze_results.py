@@ -82,18 +82,39 @@ def build_track_review_lines(display_summary: pd.DataFrame) -> list[str]:
         "表中 `straightness` 为首尾位移与累计路径长度之比，越接近 1 表示轨迹越接近单调运动；`max_step` 为相邻帧中心最大跳变，用于检查关联是否过于跳跃。",
         f"最长航迹为 T{longest_track_id}，持续 {longest_frame_count} 帧，直线性为 {longest_track['straightness']:.2f}。",
         best_track_text,
-        "由于当前数据没有 AIS 或人工真值，空间折线图容易造成“已经确认真实航迹”的误解，因此本实验将多帧确认结果放在表格中审查，不作为主图绘制。",
+        "由于当前数据没有 AIS 或人工真值，空间折线图只能展示质量确认后的疑似航迹中心移动，不能表述为已验证船舶真实航迹。",
+    ]
+
+
+def build_time_review_lines(frame_summary: pd.DataFrame) -> list[str]:
+    # 生成帧时间说明文本
+    time_diff = frame_summary["time"].diff().dropna()
+    time_diff_values = sorted(int(value) for value in time_diff.unique())
+    raw_time_group_count = int((frame_summary.groupby("raw_unixtime").size() > 1).sum())
+    raw_time_unique_count = int(frame_summary["raw_unixtime"].nunique())
+    frame_time_start = str(frame_summary["frame_time"].iloc[0])
+    frame_time_end = str(frame_summary["frame_time"].iloc[-1])
+    return [
+        "## 帧时间说明",
+        "",
+        f"原始 `raw_unixtime` 共有 {raw_time_unique_count} 个唯一值，其中 {raw_time_group_count} 组对应多帧。",
+        "这些同 `raw_unixtime` 帧的点迹数量、点迹编号和空间分布并不相同，因此不作为重复帧删除。",
+        f"本文使用帧头年月日时分秒重建逐帧时间，范围为 {frame_time_start} 至 {frame_time_end}。",
+        f"重建后按帧序号相邻比较的时间差为 {time_diff_values} 秒。",
+        "",
     ]
 
 
 def build_analysis_text() -> str:
     # 生成实验结果分析正文
     data_summary = pd.read_csv(TABLE_DIR / "data_summary.csv")
+    frame_summary = pd.read_csv(TABLE_DIR / "frame_summary.csv")
     cluster_table = pd.read_csv(RESULT_DIR / "candidate_clusters.csv")
     confirmed_tracks = pd.read_csv(RESULT_DIR / "confirmed_tracks.csv")
     track_summary = pd.read_csv(RESULT_DIR / "track_summary.csv")
     display_summary = build_display_summary(track_summary)
     track_review_lines = build_track_review_lines(display_summary)
+    time_review_lines = build_time_review_lines(frame_summary)
     confirmed_track_count = confirmed_tracks["track_id"].nunique() if "track_id" in confirmed_tracks else 0
 
     lines = [
@@ -109,6 +130,7 @@ def build_analysis_text() -> str:
         f"按帧执行信噪比和幅度分位筛选后，使用空间-速度-信号强度特征进行 DBSCAN 聚类，共得到 {len(cluster_table)} 个目标候选簇。",
         f"再通过相邻帧最近邻关联、最小持续帧数和形态质量约束，得到 {confirmed_track_count} 条疑似目标航迹。",
         "",
+        *time_review_lines,
         "## 航迹质量审查",
         "",
         *track_review_lines,
@@ -117,7 +139,8 @@ def build_analysis_text() -> str:
         "",
         "- `图1_点迹空间密度`：展示全部点迹在平面坐标中的空间密度，用于说明观测区域和点迹背景分布。",
         "- `图2_点迹空间分布`：展示全部点迹的散点形态，用于辅助理解空间覆盖范围和离散点迹结构。",
-        "- `图3_单帧候选检测`：展示第42帧的原始点迹、候选点和候选簇中心，用于说明单帧检测流程。",
+        "- `图3_确认航迹`：展示质量确认后 T30 航迹在第41至46帧之间的候选中心移动。",
+        "- `图4_单帧候选检测`：展示第42帧的原始点迹、候选点和候选簇中心，用于说明单帧检测流程。",
         "",
         "## 结果边界",
         "",

@@ -56,6 +56,8 @@ def build_frame_summary(point_table: pd.DataFrame) -> pd.DataFrame:
         point_table.groupby("frame_idx")
         .agg(
             time=("time", "first"),
+            frame_time=("frame_time", "first"),
+            raw_unixtime=("raw_unixtime", "first"),
             point_count=("id", "count"),
             range_min=("range", "min"),
             range_max=("range", "max"),
