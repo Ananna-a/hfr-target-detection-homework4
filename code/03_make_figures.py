@@ -70,6 +70,10 @@ MULTI_FRAME_GRID_COLS = 2
 METRIC_BAR_WIDTH = 0.58
 # 指标文字偏移来源：避免贴住柱顶
 METRIC_LABEL_PADDING = 0.04
+# 候选簇中心点大小来源：全局候选分布展示
+CLUSTER_CENTER_POINT_SIZE = 18
+# 确认航迹全局线宽来源：突出最终保留航迹
+GLOBAL_TRACK_LINE_WIDTH = 1.2
 
 def read_result_table(file_name: str) -> pd.DataFrame:
     # 读取结果表
@@ -251,6 +255,61 @@ def plot_multi_frame_detection(
     save_figure(figure, "图3_多帧候选检测.png")
 
 
+def plot_global_candidate_clusters(
+    point_table: pd.DataFrame,
+    cluster_table: pd.DataFrame,
+    confirmed_tracks: pd.DataFrame,
+) -> None:
+    # 绘制全局候选簇与确认航迹图
+    finite_table = point_table.replace([np.inf, -np.inf], np.nan).dropna(subset=["x", "y"])
+    figure, axis = plt.subplots(figsize=(4.9, 4.25), constrained_layout=True)
+    axis.scatter(
+        finite_table["x"],
+        finite_table["y"],
+        s=GLOBAL_POINT_SIZE,
+        color=NEUTRAL_DARK,
+        alpha=GLOBAL_POINT_ALPHA,
+        linewidths=0,
+        rasterized=True,
+        label="全体点迹",
+    )
+    axis.scatter(
+        [0],
+        [0],
+        s=RADAR_MARKER_SIZE,
+        marker="^",
+        color=RED_STRONG,
+        linewidths=0,
+        zorder=5,
+        label="坐标原点",
+    )
+    axis.scatter(
+        cluster_table["center_x"],
+        cluster_table["center_y"],
+        s=CLUSTER_CENTER_POINT_SIZE,
+        color=BLUE_MAIN,
+        alpha=0.72,
+        linewidths=0,
+        label="候选簇中心",
+    )
+    if not confirmed_tracks.empty:
+        track_id = int(confirmed_tracks["track_id"].iloc[0])
+        track_table = confirmed_tracks[confirmed_tracks["track_id"] == track_id].sort_values("frame_idx")
+        axis.plot(
+            track_table["center_x"],
+            track_table["center_y"],
+            color=RED_STRONG,
+            linewidth=GLOBAL_TRACK_LINE_WIDTH,
+            marker="o",
+            markersize=3.4,
+            label=f"T{track_id}确认航迹",
+        )
+    axis.set_title("候选簇空间分布与确认航迹", pad=5)
+    set_equal_axis(axis)
+    axis.legend(loc="upper left", frameon=False, handletextpad=0.45)
+    save_figure(figure, "图4_候选簇与确认航迹.png")
+
+
 def set_track_view(axis: plt.Axes, track_table: pd.DataFrame) -> None:
     # 设置确认航迹图展示范围
     x_min = track_table["center_x"].min() - TRACK_VIEW_PADDING_X_KM
@@ -334,7 +393,7 @@ def plot_confirmed_track(
     set_equal_axis(axis)
     set_track_view(axis, track_table)
     axis.legend(loc="upper left", frameon=False, handletextpad=0.45)
-    save_figure(figure, "图4_确认航迹.png")
+    save_figure(figure, "图5_确认航迹局部放大.png")
 
 
 def set_detection_view(axis: plt.Axes, frame_table: pd.DataFrame, frame_clusters: pd.DataFrame) -> None:
@@ -463,7 +522,7 @@ def plot_filter_funnel(
         # 标注每级筛选数量
         label_y = metric_value + max(metric_values) * METRIC_LABEL_PADDING
         axis.text(metric_index, label_y, str(metric_value), ha="center")
-    save_figure(figure, "图5_候选筛选数量评价.png")
+    save_figure(figure, "图6_候选筛选数量评价.png")
 
 
 def plot_track_quality(track_table: pd.DataFrame) -> None:
@@ -510,7 +569,7 @@ def plot_track_quality(track_table: pd.DataFrame) -> None:
     axes[1].set_xticklabels(track_labels)
     axes[1].grid(axis="y", alpha=0.28)
     axes[1].legend(frameon=False)
-    save_figure(figure, "图6_航迹质量评价.png")
+    save_figure(figure, "图7_航迹质量评价.png")
 
 
 def main():
@@ -531,6 +590,7 @@ def main():
     plot_spatial_density(point_table)
     plot_spatial_distribution(point_table)
     plot_multi_frame_detection(point_table, strong_point_table, cluster_table, confirmed_tracks)
+    plot_global_candidate_clusters(point_table, cluster_table, confirmed_tracks)
     plot_confirmed_track(point_table, confirmed_tracks, frame_summary)
     plot_filter_funnel(cluster_table, track_table, confirmed_tracks)
     plot_track_quality(track_table)
