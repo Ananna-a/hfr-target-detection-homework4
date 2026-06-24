@@ -11,7 +11,6 @@ from hfr_config import (
     FIGURE_DIR,
     NEUTRAL_BLACK,
     NEUTRAL_DARK,
-    NEUTRAL_MID,
     RED_STRONG,
     RESULT_DIR,
     TABLE_DIR,
@@ -40,6 +39,8 @@ STRONG_POINT_SIZE = 22
 CENTER_POINT_SIZE = 26
 # 局部视窗边距来源：给标注和箭头留白
 VIEW_PADDING_KM = 6.0
+# 候选簇标注偏移来源：避免遮挡中心点
+CLUSTER_LABEL_OFFSET_POINTS = (5, 5)
 
 
 def read_result_table(file_name: str) -> pd.DataFrame:
@@ -68,7 +69,7 @@ def plot_spatial_density(point_table: pd.DataFrame) -> None:
         mincnt=1,
         linewidths=0,
     )
-    axis.set_title("点迹空间密度")
+    axis.set_title("点迹空间密度", pad=5)
     set_equal_axis(axis)
     colorbar = figure.colorbar(density_plot, ax=axis, label="点迹数（对数色标）", fraction=0.048, pad=0.025)
     colorbar.outline.set_linewidth(0.5)
@@ -96,10 +97,11 @@ def plot_spatial_distribution(point_table: pd.DataFrame) -> None:
         color=RED_STRONG,
         linewidths=0,
         zorder=5,
+        label="坐标原点",
     )
-    axis.annotate("坐标原点", (0, 0), xytext=(5, 5), textcoords="offset points", fontsize=7.5, color=NEUTRAL_BLACK)
-    axis.set_title("点迹空间分布")
+    axis.set_title("点迹空间分布", pad=5)
     set_equal_axis(axis)
+    axis.legend(loc="upper left", frameon=False, handletextpad=0.45)
     save_figure(figure, "图2_点迹空间分布.png")
 
 
@@ -152,7 +154,8 @@ def plot_single_frame_detection(
         label="候选点",
     )
 
-    for cluster_order, cluster_row in enumerate(frame_clusters.sort_values("center_y", ascending=False).itertuples(), start=1):
+    sorted_clusters = frame_clusters.sort_values("center_y", ascending=False)
+    for cluster_order, cluster_row in enumerate(sorted_clusters.itertuples(), start=1):
         # 标注每个候选簇
         axis.scatter(
             [cluster_row.center_x],
@@ -166,28 +169,18 @@ def plot_single_frame_detection(
         axis.annotate(
             f"C{cluster_order}",
             (cluster_row.center_x, cluster_row.center_y),
-            xytext=(5, 5),
+            xytext=CLUSTER_LABEL_OFFSET_POINTS,
             textcoords="offset points",
-            fontsize=7.5,
+            fontsize=7,
             color=NEUTRAL_BLACK,
             zorder=7,
         )
 
-    axis.set_title(f"第{DISPLAY_FRAME_ID}帧候选簇提取")
+    axis.set_title(f"第{DISPLAY_FRAME_ID}帧候选簇提取", pad=5)
     set_equal_axis(axis)
     set_detection_view(axis, frame_table, frame_clusters)
     axis.scatter([], [], s=CENTER_POINT_SIZE, marker="o", color=RED_STRONG, label="候选中心")
     axis.legend(loc="upper right", frameon=False, handletextpad=0.45)
-    axis.text(
-        0.03,
-        0.96,
-        f"灰点：本帧点迹\n蓝点：候选点",
-        transform=axis.transAxes,
-        va="top",
-        fontsize=7.5,
-        color=NEUTRAL_BLACK,
-        bbox={"fc": "white", "ec": "#bdbdbd", "lw": 0.4, "boxstyle": "round,pad=0.22", "alpha": 0.9},
-    )
     save_figure(figure, "图3_单帧候选检测.png")
 
 

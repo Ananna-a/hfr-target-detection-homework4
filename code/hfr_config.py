@@ -22,7 +22,7 @@ XY_VX_COL = 1
 XY_Y_COL = 2
 XY_VY_COL = 3
 # 速度换算来源：1 m/s = 3.6 km/h
-KMH_TO_MPS = 3.6
+KMH_PER_MPS = 3.6
 # 图片分辨率来源：报告插图清晰度要求
 FIGURE_DPI = 300
 # Nature风格蓝色来源：候选目标主强调色
@@ -66,8 +66,16 @@ DISPLAY_FRAME_ID = 42
 MAX_LINK_DISTANCE_KM = 12.0
 # 航迹关联速度差来源：相邻帧径向速度最大允许差
 MAX_VELOCITY_DIFF_KMH = 25.0
+# 航迹最大断帧来源：本实验只关联相邻帧候选
+MAX_TRACK_GAP_FRAMES = 1
 # 确认航迹长度来源：过滤短寿命候选
 MIN_TRACK_LENGTH = 5
+# 确认航迹直线性来源：过滤往返跳动明显的候选链
+MIN_TRACK_STRAIGHTNESS = 0.50
+# 确认航迹最大步长来源：过滤相邻帧中心突跳
+MAX_TRACK_STEP_KM = 3.00
+# 确认航迹平均步长来源：过滤整体跳动偏大的候选链
+MAX_MEAN_TRACK_STEP_KM = 1.50
 
 
 def ensure_output_dirs() -> None:
@@ -85,11 +93,11 @@ def configure_plot_style() -> None:
     plt.rcParams["axes.facecolor"] = "white"
     plt.rcParams["axes.edgecolor"] = "#222222"
     plt.rcParams["axes.linewidth"] = 0.8
-    plt.rcParams["axes.titlesize"] = 10
-    plt.rcParams["axes.labelsize"] = 8
-    plt.rcParams["xtick.labelsize"] = 7
-    plt.rcParams["ytick.labelsize"] = 7
-    plt.rcParams["legend.fontsize"] = 7
+    plt.rcParams["axes.titlesize"] = 9
+    plt.rcParams["axes.labelsize"] = 7.5
+    plt.rcParams["xtick.labelsize"] = 6.8
+    plt.rcParams["ytick.labelsize"] = 6.8
+    plt.rcParams["legend.fontsize"] = 6.8
     plt.rcParams["grid.color"] = "#dddddd"
     plt.rcParams["grid.linestyle"] = "--"
     plt.rcParams["grid.linewidth"] = 0.55
@@ -143,7 +151,7 @@ def frame_to_dataframe(hfr_data: np.ndarray, frame_idx: int) -> pd.DataFrame:
             "id": np.asarray(frame_struct["id"]).reshape(-1).astype(int),
             "range": np.asarray(frame_struct["range"]).reshape(-1).astype(float),
             "velocity": velocity_values,
-            "velocity_mps": velocity_values / KMH_TO_MPS,
+            "velocity_mps": velocity_values / KMH_PER_MPS,
             "ang": np.asarray(frame_struct["ang"]).reshape(-1).astype(float),
             "x": xy_values[:, XY_X_COL],
             "vx": xy_values[:, XY_VX_COL],

@@ -25,13 +25,12 @@ __pycache__/
 要求.jpg
 ~$*
 
-# 生成结果
-report/figures/*
+# 生成表格和检测结果
 report/tables/*
 report/results/*
-!report/figures/.gitkeep
 !report/tables/.gitkeep
 !report/results/.gitkeep
+!report/figures/*.pdf
 
 # 系统文件
 .DS_Store

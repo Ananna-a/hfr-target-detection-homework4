@@ -9,10 +9,14 @@ from hfr_config import (
     AMP_SCALE,
     DBSCAN_EPS,
     DBSCAN_MIN_SAMPLES,
+    MAX_MEAN_TRACK_STEP_KM,
     MAX_LINK_DISTANCE_KM,
+    MAX_TRACK_GAP_FRAMES,
+    MAX_TRACK_STEP_KM,
     MAX_VELOCITY_DIFF_KMH,
     MIN_CLUSTER_SIZE,
     MIN_TRACK_LENGTH,
+    MIN_TRACK_STRAIGHTNESS,
     RESULT_DIR,
     SNR_QUANTILE,
     SNR_SCALE_DB,
@@ -32,6 +36,40 @@ TRACK_FILE_NAME = "candidate_tracks.csv"
 CONFIRMED_TRACK_FILE_NAME = "confirmed_tracks.csv"
 # 航迹摘要文件名来源：报告分析引用
 TRACK_SUMMARY_FILE_NAME = "track_summary.csv"
+# 确认航迹字段来源：空结果也保留稳定表头
+TRACK_RESULT_COLUMNS = [
+    "frame_idx",
+    "cluster_id",
+    "point_count",
+    "center_x",
+    "center_y",
+    "center_lon",
+    "center_lat",
+    "mean_velocity",
+    "mean_snr",
+    "mean_amp",
+    "score",
+    "track_id",
+]
+# 航迹摘要字段来源：报告分析表格固定读取
+TRACK_SUMMARY_COLUMNS = [
+    "track_id",
+    "frame_count",
+    "start_frame",
+    "end_frame",
+    "mean_snr",
+    "mean_velocity",
+    "mean_point_count",
+    "start_x",
+    "start_y",
+    "end_x",
+    "end_y",
+    "displacement",
+    "path_length",
+    "straightness",
+    "mean_step",
+    "max_step",
+]
 
 
 def select_strong_points(frame_table: pd.DataFrame) -> pd.DataFrame:
@@ -63,7 +101,8 @@ def detect_frame_clusters(frame_table: pd.DataFrame) -> tuple[pd.DataFrame, list
     if len(strong_points) < DBSCAN_MIN_SAMPLES:
         return strong_points.assign(cluster_id=-1), []
 
-    cluster_labels = DBSCAN(eps=DBSCAN_EPS, min_samples=DBSCAN_MIN_SAMPLES).fit_predict(build_cluster_features(strong_points))
+    cluster_features = build_cluster_features(strong_points)
+    cluster_labels = DBSCAN(eps=DBSCAN_EPS, min_samples=DBSCAN_MIN_SAMPLES).fit_predict(cluster_features)
     strong_points["cluster_id"] = cluster_labels
     cluster_rows = []
 
@@ -169,13 +208,22 @@ def link_tracks(cluster_table: pd.DataFrame) -> pd.DataFrame:
             )
             next_track_id += 1
 
-    return pd.DataFrame(track_rows)
+        # 移除无法继续关联的历史航迹
+        active_tracks = [
+            track_state
+            for track_state in active_tracks
+            if frame_idx - track_state["last_frame"] <= MAX_TRACK_GAP_FRAMES
+        ]
+
+    if not track_rows:
+        return pd.DataFrame(columns=TRACK_RESULT_COLUMNS)
+    return pd.DataFrame(track_rows)[TRACK_RESULT_COLUMNS]
 
 
 def summarize_tracks(confirmed_tracks: pd.DataFrame) -> pd.DataFrame:
     # 汇总确认航迹的关键指标
     if confirmed_tracks.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=TRACK_SUMMARY_COLUMNS)
     ordered_tracks = confirmed_tracks.sort_values(["track_id", "frame_idx"])
     track_summary = (
         ordered_tracks.groupby("track_id")
@@ -216,7 +264,38 @@ def summarize_tracks(confirmed_tracks: pd.DataFrame) -> pd.DataFrame:
         )
     quality_table = pd.DataFrame(quality_rows)
     track_summary = track_summary.merge(quality_table, on="track_id", how="left")
-    return track_summary.sort_values(["straightness", "frame_count", "mean_snr"], ascending=False)
+    sorted_summary = track_summary.sort_values(["straightness", "frame_count", "mean_snr"], ascending=False)
+    return sorted_summary[TRACK_SUMMARY_COLUMNS]
+
+
+def filter_track_summary(track_summary: pd.DataFrame) -> pd.DataFrame:
+    # 筛选形态质量达标的航迹摘要
+    if track_summary.empty:
+        return track_summary
+    quality_mask = (
+        (track_summary["straightness"] >= MIN_TRACK_STRAIGHTNESS)
+        & (track_summary["max_step"] <= MAX_TRACK_STEP_KM)
+        & (track_summary["mean_step"] <= MAX_MEAN_TRACK_STEP_KM)
+    )
+    return track_summary[quality_mask].copy()
+
+
+def select_confirmed_tracks(track_table: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    # 按长度和形态质量确认疑似航迹
+    if track_table.empty:
+        empty_tracks = pd.DataFrame(columns=TRACK_RESULT_COLUMNS)
+        empty_summary = pd.DataFrame(columns=TRACK_SUMMARY_COLUMNS)
+        return empty_tracks, empty_summary, empty_summary
+
+    track_lengths = track_table.groupby("track_id").size()
+    length_track_ids = track_lengths[track_lengths >= MIN_TRACK_LENGTH].index
+    length_tracks = track_table[track_table["track_id"].isin(length_track_ids)].copy()
+    length_summary = summarize_tracks(length_tracks)
+    quality_summary = filter_track_summary(length_summary)
+    confirmed_track_ids = quality_summary["track_id"].astype(int).tolist()
+    confirmed_tracks = track_table[track_table["track_id"].isin(confirmed_track_ids)].copy()
+    track_summary = summarize_tracks(confirmed_tracks)
+    return confirmed_tracks, track_summary, length_summary
 
 
 def main():
@@ -228,10 +307,7 @@ def main():
     point_table = load_point_table()
     strong_point_table, cluster_table = detect_all_clusters(point_table)
     track_table = link_tracks(cluster_table)
-    track_lengths = track_table.groupby("track_id").size() if not track_table.empty else pd.Series(dtype=int)
-    confirmed_track_ids = track_lengths[track_lengths >= MIN_TRACK_LENGTH].index
-    confirmed_tracks = track_table[track_table["track_id"].isin(confirmed_track_ids)].copy()
-    track_summary = summarize_tracks(confirmed_tracks)
+    confirmed_tracks, track_summary, length_summary = select_confirmed_tracks(track_table)
 
     # 保存结果数据
     strong_point_table.to_csv(TABLE_DIR / "strong_points.csv", index=False, encoding="utf-8-sig")
@@ -243,7 +319,8 @@ def main():
     # 输出运行摘要
     print(f"候选簇数量：{len(cluster_table)}")
     print(f"候选航迹数量：{track_table['track_id'].nunique() if not track_table.empty else 0}")
-    print(f"确认航迹数量：{confirmed_tracks['track_id'].nunique() if not confirmed_tracks.empty else 0}")
+    print(f"长度达标航迹数量：{length_summary['track_id'].nunique() if not length_summary.empty else 0}")
+    print(f"质量确认航迹数量：{confirmed_tracks['track_id'].nunique() if not confirmed_tracks.empty else 0}")
 
 
 if __name__ == "__main__":

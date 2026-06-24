@@ -43,12 +43,47 @@ def get_summary_value(data_summary: pd.DataFrame, metric_name: str) -> str:
 
 def build_display_summary(track_summary: pd.DataFrame) -> pd.DataFrame:
     # 整理航迹摘要展示表
+    if track_summary.empty:
+        return pd.DataFrame(columns=DISPLAY_COLUMNS)
     display_summary = track_summary[DISPLAY_COLUMNS].copy()
     for column_name in INTEGER_COLUMNS:
         display_summary[column_name] = display_summary[column_name].astype(int)
     for column_name in ROUND_COLUMNS:
         display_summary[column_name] = display_summary[column_name].round(2)
     return display_summary
+
+
+def build_track_review_lines(display_summary: pd.DataFrame) -> list[str]:
+    # 生成航迹质量审查文本
+    if display_summary.empty:
+        return [
+            "当前参数下未形成同时满足持续帧数和形态质量约束的疑似目标航迹。",
+            "这说明质量过滤后保留结果较保守，可在报告中表述为候选检测演示，不宜宣称完成真实目标确认。",
+        ]
+
+    longest_track = display_summary.sort_values(["frame_count", "mean_snr"], ascending=False).iloc[0]
+    best_quality_track = display_summary.sort_values(
+        ["straightness", "frame_count", "mean_snr"],
+        ascending=False,
+    ).iloc[0]
+    longest_track_id = int(longest_track["track_id"])
+    longest_frame_count = int(longest_track["frame_count"])
+    best_track_id = int(best_quality_track["track_id"])
+    best_frame_count = int(best_quality_track["frame_count"])
+    best_straightness = best_quality_track["straightness"]
+    best_max_step = best_quality_track["max_step"]
+    best_track_text = (
+        f"质量较好的候选链为 T{best_track_id}，持续 {best_frame_count} 帧，"
+        f"直线性为 {best_straightness:.2f}，最大跳变为 {best_max_step:.2f} km。"
+    )
+    return [
+        *dataframe_to_markdown(display_summary),
+        "",
+        "表中 `straightness` 为首尾位移与累计路径长度之比，越接近 1 表示轨迹越接近单调运动；`max_step` 为相邻帧中心最大跳变，用于检查关联是否过于跳跃。",
+        f"最长航迹为 T{longest_track_id}，持续 {longest_frame_count} 帧，直线性为 {longest_track['straightness']:.2f}。",
+        best_track_text,
+        "由于当前数据没有 AIS 或人工真值，空间折线图容易造成“已经确认真实航迹”的误解，因此本实验将多帧确认结果放在表格中审查，不作为主图绘制。",
+    ]
 
 
 def build_analysis_text() -> str:
@@ -58,27 +93,25 @@ def build_analysis_text() -> str:
     confirmed_tracks = pd.read_csv(RESULT_DIR / "confirmed_tracks.csv")
     track_summary = pd.read_csv(RESULT_DIR / "track_summary.csv")
     display_summary = build_display_summary(track_summary)
-
-    longest_track = display_summary.sort_values(["frame_count", "mean_snr"], ascending=False).iloc[0]
-    best_quality_track = display_summary.sort_values(["straightness", "frame_count", "mean_snr"], ascending=False).iloc[0]
+    track_review_lines = build_track_review_lines(display_summary)
+    confirmed_track_count = confirmed_tracks["track_id"].nunique() if "track_id" in confirmed_tracks else 0
 
     lines = [
         "# 实验结果分析",
         "",
         "## 数据与检测结果",
         "",
-        f"整理后数据共包含 {get_summary_value(data_summary, '帧数')} 帧、{get_summary_value(data_summary, '总点迹数')} 个点迹。",
+        f"原始数据共包含 {get_summary_value(data_summary, '帧数')} 帧、{get_summary_value(data_summary, '原始总点迹数')} 个点迹。",
+        (
+            f"清洗无效信噪比点后，保留 {get_summary_value(data_summary, '清洗后点迹数')} 个点迹，"
+            f"无效信噪比点数为 {get_summary_value(data_summary, '无效信噪比点数')}。"
+        ),
         f"按帧执行信噪比和幅度分位筛选后，使用空间-速度-信号强度特征进行 DBSCAN 聚类，共得到 {len(cluster_table)} 个目标候选簇。",
-        f"再通过相邻帧最近邻关联和最小持续帧数约束，得到 {confirmed_tracks['track_id'].nunique()} 条疑似目标航迹。",
+        f"再通过相邻帧最近邻关联、最小持续帧数和形态质量约束，得到 {confirmed_track_count} 条疑似目标航迹。",
         "",
         "## 航迹质量审查",
         "",
-        *dataframe_to_markdown(display_summary),
-        "",
-        "表中 `straightness` 为首尾位移与累计路径长度之比，越接近 1 表示轨迹越接近单调运动；`max_step` 为相邻帧中心最大跳变，用于检查关联是否过于跳跃。",
-        f"最长航迹为 T{int(longest_track['track_id'])}，持续 {int(longest_track['frame_count'])} 帧，但直线性为 {longest_track['straightness']:.2f}，说明其候选中心存在明显往返跳动，不适合作为主图展示。",
-        f"质量较好的候选链为 T{int(best_quality_track['track_id'])}，持续 {int(best_quality_track['frame_count'])} 帧，直线性为 {best_quality_track['straightness']:.2f}，最大跳变为 {best_quality_track['max_step']:.2f} km。",
-        "由于当前数据没有 AIS 或人工真值，空间折线图容易造成“已经确认真实航迹”的误解，因此本实验将多帧确认结果放在表格中审查，不作为主图绘制。",
+        *track_review_lines,
         "",
         "## 图件说明",
         "",
