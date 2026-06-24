@@ -69,6 +69,24 @@ TRACK_AXIS_TICK_COUNT = 4
 MULTI_FRAME_PANEL_COUNT = 4
 # 多帧候选拼图列数来源：报告版面
 MULTI_FRAME_GRID_COLS = 2
+# 多帧候选拼图尺寸来源：保持四个子图等大并压缩中部空白
+MULTI_FRAME_FIGURE_SIZE = (6.35, 5.9)
+# 多帧候选坐标刻度数来源：保持四个子图刻度一致
+MULTI_FRAME_AXIS_TICK_COUNT = 4
+# 多帧候选左边距来源：容纳纵轴标签
+MULTI_FRAME_LEFT_MARGIN = 0.085
+# 多帧候选右边距来源：保持左右对称
+MULTI_FRAME_RIGHT_MARGIN = 0.985
+# 多帧候选下边距来源：容纳横轴标签
+MULTI_FRAME_BOTTOM_MARGIN = 0.075
+# 多帧候选上边距来源：容纳统一图例
+MULTI_FRAME_TOP_MARGIN = 0.895
+# 多帧候选横向间距来源：减少左右面板中部空白
+MULTI_FRAME_WSPACE = 0.08
+# 多帧候选纵向间距来源：减少上下面板空白
+MULTI_FRAME_HSPACE = 0.22
+# 多帧候选图例高度来源：固定图例位置
+MULTI_FRAME_LEGEND_Y = 0.985
 # 指标柱状图宽度来源：分类数量展示
 METRIC_BAR_WIDTH = 0.58
 # 指标文字偏移来源：避免贴住柱顶
@@ -163,6 +181,47 @@ def get_track_frame_ids(confirmed_tracks: pd.DataFrame) -> list[int]:
     return [unique_frames[frame_index] for frame_index in frame_indices]
 
 
+def get_multi_frame_view_limits(
+    point_table: pd.DataFrame,
+    cluster_table: pd.DataFrame,
+    frame_ids: list[int],
+) -> tuple[float, float, float, float]:
+    # 计算多帧拼图统一展示范围
+    selected_clusters = cluster_table[cluster_table["frame_idx"].isin(frame_ids)]
+    if selected_clusters.empty:
+        selected_points = point_table[point_table["frame_idx"].isin(frame_ids)]
+        x_min, x_max = selected_points["x"].min(), selected_points["x"].max()
+        y_min, y_max = selected_points["y"].min(), selected_points["y"].max()
+    else:
+        x_min, x_max = selected_clusters["center_x"].min(), selected_clusters["center_x"].max()
+        y_min, y_max = selected_clusters["center_y"].min(), selected_clusters["center_y"].max()
+    return (
+        x_min - VIEW_PADDING_KM * 1.55,
+        x_max + VIEW_PADDING_KM * 1.55,
+        y_min - VIEW_PADDING_KM * 1.45,
+        y_max + VIEW_PADDING_KM * 1.45,
+    )
+
+
+def set_multi_frame_ticks(axis: plt.Axes, view_limits: tuple[float, float, float, float]) -> None:
+    # 设置多帧拼图统一坐标刻度
+    x_ticks = np.linspace(view_limits[0], view_limits[1], MULTI_FRAME_AXIS_TICK_COUNT)
+    y_ticks = np.linspace(view_limits[2], view_limits[3], MULTI_FRAME_AXIS_TICK_COUNT)
+    axis.set_xticks(x_ticks)
+    axis.set_yticks(y_ticks)
+    axis.xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+    axis.yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+
+
+def set_multi_frame_outer_labels(axis: plt.Axes, axis_index: int) -> None:
+    # 设置多帧拼图外侧坐标标签
+    is_left_column = axis_index % MULTI_FRAME_GRID_COLS == 0
+    is_bottom_row = axis_index >= MULTI_FRAME_GRID_COLS
+    axis.set_ylabel("y / km" if is_left_column else "")
+    axis.set_xlabel("x / km" if is_bottom_row else "")
+    axis.tick_params(labelleft=is_left_column, labelbottom=is_bottom_row)
+
+
 def draw_frame_detection(
     axis: plt.Axes,
     point_table: pd.DataFrame,
@@ -170,6 +229,7 @@ def draw_frame_detection(
     cluster_table: pd.DataFrame,
     frame_id: int,
     show_labels: bool,
+    view_limits: tuple[float, float, float, float] | None = None,
 ) -> None:
     # 绘制指定帧候选检测结果
     frame_table = point_table[point_table["frame_idx"] == frame_id]
@@ -221,7 +281,11 @@ def draw_frame_detection(
 
     axis.set_title(f"F{frame_id}", pad=4)
     set_equal_axis(axis)
-    set_detection_view(axis, frame_table, frame_clusters)
+    if view_limits is None:
+        set_detection_view(axis, frame_table, frame_clusters)
+    else:
+        axis.set_xlim(view_limits[0], view_limits[1])
+        axis.set_ylim(view_limits[2], view_limits[3])
 
 
 def plot_multi_frame_detection(
@@ -235,10 +299,19 @@ def plot_multi_frame_detection(
     figure, axes = plt.subplots(
         nrows=2,
         ncols=MULTI_FRAME_GRID_COLS,
-        figsize=(7.1, 5.6),
-        constrained_layout=True,
+        figsize=MULTI_FRAME_FIGURE_SIZE,
+        constrained_layout=False,
+    )
+    figure.subplots_adjust(
+        left=MULTI_FRAME_LEFT_MARGIN,
+        right=MULTI_FRAME_RIGHT_MARGIN,
+        bottom=MULTI_FRAME_BOTTOM_MARGIN,
+        top=MULTI_FRAME_TOP_MARGIN,
+        wspace=MULTI_FRAME_WSPACE,
+        hspace=MULTI_FRAME_HSPACE,
     )
     flat_axes = axes.ravel()
+    view_limits = get_multi_frame_view_limits(point_table, cluster_table, frame_ids)
     for axis_index, axis in enumerate(flat_axes):
         # 填充代表帧子图
         if axis_index >= len(frame_ids):
@@ -251,9 +324,19 @@ def plot_multi_frame_detection(
             cluster_table,
             frame_ids[axis_index],
             show_labels=axis_index == 0,
+            view_limits=view_limits,
         )
+        set_multi_frame_ticks(axis, view_limits)
+        set_multi_frame_outer_labels(axis, axis_index)
     handles, labels = flat_axes[0].get_legend_handles_labels()
-    figure.legend(handles, labels, loc="upper center", ncol=3, frameon=False)
+    figure.legend(
+        handles,
+        labels,
+        loc="upper center",
+        ncol=3,
+        bbox_to_anchor=(0.5, MULTI_FRAME_LEGEND_Y),
+        frameon=False,
+    )
     save_figure(figure, "图3_多帧候选检测.png")
 
 
