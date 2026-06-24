@@ -11,6 +11,7 @@ from hfr_config import (
     BLUE_SECONDARY,
     DISPLAY_FRAME_ID,
     FIGURE_DIR,
+    MAX_DIRECTION_CHANGE_DEG,
     MAX_MEAN_TRACK_STEP_KM,
     MAX_TRACK_STEP_KM,
     MIN_TRACK_LENGTH,
@@ -21,6 +22,7 @@ from hfr_config import (
     RED_STRONG,
     RESULT_DIR,
     TABLE_DIR,
+    MIN_DIRECTION_STEP_KM,
     configure_plot_style,
     ensure_output_dirs,
     load_point_table,
@@ -482,6 +484,7 @@ def summarize_track_quality(track_table: pd.DataFrame) -> pd.DataFrame:
         path_length = float(step_distances.sum())
         displacement = float(np.linalg.norm(coordinate_values[-1] - coordinate_values[0]))
         straightness = displacement / path_length if path_length > 0 else 0.0
+        turn_angles = calculate_track_turn_angles(coordinate_values)
         quality_rows.append(
             {
                 "track_id": int(track_id),
@@ -490,9 +493,28 @@ def summarize_track_quality(track_table: pd.DataFrame) -> pd.DataFrame:
                 "straightness": straightness,
                 "mean_step": float(step_distances.mean()) if len(step_distances) else 0.0,
                 "max_step": float(step_distances.max()) if len(step_distances) else 0.0,
+                "max_turn_angle": float(max(turn_angles)) if turn_angles else 0.0,
             }
         )
     return pd.DataFrame(quality_rows)
+
+
+def calculate_track_turn_angles(coordinate_values: np.ndarray) -> list[float]:
+    # 计算候选航迹的有效转向角
+    if len(coordinate_values) < 3:
+        return []
+
+    step_vectors = np.diff(coordinate_values, axis=0)
+    turn_angles = []
+    for previous_step, current_step in zip(step_vectors[:-1], step_vectors[1:]):
+        previous_distance = float(np.linalg.norm(previous_step))
+        current_distance = float(np.linalg.norm(current_step))
+        if previous_distance < MIN_DIRECTION_STEP_KM or current_distance < MIN_DIRECTION_STEP_KM:
+            continue
+        cosine_value = float(np.dot(previous_step, current_step) / (previous_distance * current_distance))
+        clipped_cosine = float(np.clip(cosine_value, -1.0, 1.0))
+        turn_angles.append(float(np.degrees(np.arccos(clipped_cosine))))
+    return turn_angles
 
 
 def plot_filter_funnel(
@@ -536,7 +558,7 @@ def plot_track_quality(track_table: pd.DataFrame) -> None:
     display_quality = display_quality.sort_values("track_id")
     track_labels = [f"T{int(track_id)}" for track_id in display_quality["track_id"]]
 
-    figure, axes = plt.subplots(nrows=1, ncols=2, figsize=(7.2, 3.25), constrained_layout=True)
+    figure, axes = plt.subplots(nrows=1, ncols=3, figsize=(9.2, 3.25), constrained_layout=True)
     axes[0].bar(track_labels, display_quality["straightness"], color=BLUE_MAIN, width=METRIC_BAR_WIDTH)
     axes[0].axhline(MIN_TRACK_STRAIGHTNESS, color=RED_STRONG, linestyle="--", linewidth=0.9, label="确认阈值")
     axes[0].set_title("航迹直线性", pad=5)
@@ -569,6 +591,13 @@ def plot_track_quality(track_table: pd.DataFrame) -> None:
     axes[1].set_xticklabels(track_labels)
     axes[1].grid(axis="y", alpha=0.28)
     axes[1].legend(frameon=False)
+
+    axes[2].bar(track_labels, display_quality["max_turn_angle"], color=BLUE_MAIN, width=METRIC_BAR_WIDTH)
+    axes[2].axhline(MAX_DIRECTION_CHANGE_DEG, color=RED_STRONG, linestyle="--", linewidth=0.9, label="转向阈值")
+    axes[2].set_title("最大转向角", pad=5)
+    axes[2].set_ylabel("angle / deg")
+    axes[2].grid(axis="y", alpha=0.28)
+    axes[2].legend(frameon=False)
     save_figure(figure, "图7_航迹质量评价.png")
 
 

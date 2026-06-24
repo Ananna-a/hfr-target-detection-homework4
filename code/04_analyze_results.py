@@ -19,11 +19,20 @@ DISPLAY_COLUMNS = [
     "path_length",
     "straightness",
     "max_step",
+    "max_turn_angle",
 ]
 # 整数列来源：航迹编号和帧编号
 INTEGER_COLUMNS = ["track_id", "frame_count", "start_frame", "end_frame"]
 # 小数列来源：航迹质量和信号质量
-ROUND_COLUMNS = ["mean_snr", "mean_velocity", "displacement", "path_length", "straightness", "max_step"]
+ROUND_COLUMNS = [
+    "mean_snr",
+    "mean_velocity",
+    "displacement",
+    "path_length",
+    "straightness",
+    "max_step",
+    "max_turn_angle",
+]
 
 
 def dataframe_to_markdown(data_frame: pd.DataFrame) -> list[str]:
@@ -79,7 +88,7 @@ def build_track_review_lines(display_summary: pd.DataFrame) -> list[str]:
     return [
         *dataframe_to_markdown(display_summary),
         "",
-        "表中 `straightness` 为首尾位移与累计路径长度之比，越接近 1 表示轨迹越接近单调运动；`max_step` 为相邻帧中心最大跳变，用于检查关联是否过于跳跃。",
+        "表中 `straightness` 为首尾位移与累计路径长度之比，越接近 1 表示轨迹越接近单调运动；`max_step` 为相邻帧中心最大跳变；`max_turn_angle` 为连续两段中心位移的最大夹角。",
         f"最长航迹为 T{longest_track_id}，持续 {longest_frame_count} 帧，直线性为 {longest_track['straightness']:.2f}。",
         best_track_text,
         "由于当前数据没有 AIS 或人工真值，空间折线图只能展示质量确认后的疑似航迹中心移动，不能表述为已验证船舶真实航迹。",
@@ -117,7 +126,7 @@ def build_metric_review_lines(
         "## 评价指标说明",
         "",
         "由于当前数据没有 AIS 真值或人工标注，不能计算严格意义上的准确率、召回率和 F1 值。",
-        "本实验采用无监督质量评价：候选数量、连续帧数、直线性、相邻帧最大跳变和平均信噪比。",
+        "本实验采用无监督质量评价：候选数量、连续帧数、直线性、相邻帧最大跳变、最大转向角和平均信噪比。",
         f"筛选流程从 {len(cluster_table)} 个候选簇形成 {track_count} 条候选航迹，最终保留 {confirmed_track_count} 条质量确认航迹。",
         "若后续获得 AIS 或人工标注，才可以进一步计算检测率、虚警率和航迹误差。",
         "",
@@ -137,6 +146,10 @@ def build_analysis_text() -> str:
     time_review_lines = build_time_review_lines(frame_summary)
     metric_review_lines = build_metric_review_lines(cluster_table, track_table, confirmed_tracks)
     confirmed_track_count = confirmed_tracks["track_id"].nunique() if "track_id" in confirmed_tracks else 0
+    confirmed_track_label = "确认航迹"
+    if not confirmed_tracks.empty and "track_id" in confirmed_tracks:
+        confirmed_track_id = int(confirmed_tracks["track_id"].iloc[0])
+        confirmed_track_label = f"T{confirmed_track_id}"
 
     lines = [
         "# 实验结果分析",
@@ -149,7 +162,7 @@ def build_analysis_text() -> str:
             f"无效信噪比点数为 {get_summary_value(data_summary, '无效信噪比点数')}。"
         ),
         f"按帧执行信噪比和幅度分位筛选后，使用空间-速度-信号强度特征进行 DBSCAN 聚类，共得到 {len(cluster_table)} 个目标候选簇。",
-        f"再通过相邻帧最近邻关联、最小持续帧数和形态质量约束，得到 {confirmed_track_count} 条疑似目标航迹。",
+        f"再通过相邻帧最近邻关联、速度一致性、方向一致性、最小持续帧数和形态质量约束，得到 {confirmed_track_count} 条疑似目标航迹。",
         "",
         *time_review_lines,
         *metric_review_lines,
@@ -163,9 +176,9 @@ def build_analysis_text() -> str:
         "- `图2_点迹空间分布`：展示全部点迹的散点形态，用于辅助理解空间覆盖范围和离散点迹结构。",
         "- `图3_多帧候选检测`：展示确认航迹中的四个代表帧，说明每帧候选点和候选簇如何形成。",
         "- `图4_候选簇与确认航迹`：展示全局候选簇中心和最终确认航迹在观测空间中的相对位置。",
-        "- `图5_确认航迹局部放大`：展示质量确认后 T30 航迹在第41至46帧之间的候选中心移动。",
+        f"- `图5_确认航迹局部放大`：展示质量确认后 {confirmed_track_label} 在连续帧之间的候选中心移动。",
         "- `图6_候选筛选数量评价`：展示候选簇、候选航迹、长度达标航迹和质量确认航迹的数量变化。",
-        "- `图7_航迹质量评价`：展示长度达标候选航迹的直线性和相邻帧最大跳变。",
+        "- `图7_航迹质量评价`：展示长度达标候选航迹的直线性、相邻帧跳变和最大转向角。",
         "",
         "## 结果边界",
         "",

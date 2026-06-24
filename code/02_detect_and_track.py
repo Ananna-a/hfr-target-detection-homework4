@@ -9,11 +9,14 @@ from hfr_config import (
     AMP_SCALE,
     DBSCAN_EPS,
     DBSCAN_MIN_SAMPLES,
+    MAX_DIRECTION_CHANGE_DEG,
     MAX_MEAN_TRACK_STEP_KM,
     MAX_LINK_DISTANCE_KM,
     MAX_TRACK_GAP_FRAMES,
     MAX_TRACK_STEP_KM,
+    MAX_VECTOR_VELOCITY_DIFF_KMH,
     MAX_VELOCITY_DIFF_KMH,
+    MIN_DIRECTION_STEP_KM,
     MIN_CLUSTER_SIZE,
     MIN_TRACK_LENGTH,
     MIN_TRACK_STRAIGHTNESS,
@@ -46,6 +49,8 @@ TRACK_RESULT_COLUMNS = [
     "center_lon",
     "center_lat",
     "mean_velocity",
+    "mean_vx",
+    "mean_vy",
     "mean_snr",
     "mean_amp",
     "score",
@@ -59,6 +64,8 @@ TRACK_SUMMARY_COLUMNS = [
     "end_frame",
     "mean_snr",
     "mean_velocity",
+    "mean_vx",
+    "mean_vy",
     "mean_point_count",
     "start_x",
     "start_y",
@@ -69,6 +76,7 @@ TRACK_SUMMARY_COLUMNS = [
     "straightness",
     "mean_step",
     "max_step",
+    "max_turn_angle",
 ]
 
 
@@ -120,6 +128,8 @@ def detect_frame_clusters(frame_table: pd.DataFrame) -> tuple[pd.DataFrame, list
                 "center_lon": float(cluster_table["lon"].mean()),
                 "center_lat": float(cluster_table["lat"].mean()),
                 "mean_velocity": float(cluster_table["velocity"].mean()),
+                "mean_vx": float(cluster_table["vx"].mean()),
+                "mean_vy": float(cluster_table["vy"].mean()),
                 "mean_snr": float(cluster_table["snr"].mean()),
                 "mean_amp": float(cluster_table["amp"].mean()),
                 "score": float(cluster_table["snr"].mean() + np.log1p(len(cluster_table))),
@@ -148,6 +158,41 @@ def candidate_distance(candidate_row: pd.Series, track_state: dict) -> float:
     return float(np.hypot(delta_x, delta_y))
 
 
+def calculate_direction_change(candidate_row: pd.Series, track_state: dict) -> float:
+    # 计算候选延续方向与上一段方向的夹角
+    if track_state.get("previous_x") is None:
+        return 0.0
+
+    previous_step = np.array(
+        [
+            track_state["last_x"] - track_state["previous_x"],
+            track_state["last_y"] - track_state["previous_y"],
+        ],
+        dtype=float,
+    )
+    current_step = np.array(
+        [
+            candidate_row["center_x"] - track_state["last_x"],
+            candidate_row["center_y"] - track_state["last_y"],
+        ],
+        dtype=float,
+    )
+    previous_distance = float(np.linalg.norm(previous_step))
+    current_distance = float(np.linalg.norm(current_step))
+    if previous_distance < MIN_DIRECTION_STEP_KM or current_distance < MIN_DIRECTION_STEP_KM:
+        return 0.0
+
+    cosine_value = float(np.dot(previous_step, current_step) / (previous_distance * current_distance))
+    clipped_cosine = float(np.clip(cosine_value, -1.0, 1.0))
+    return float(np.degrees(np.arccos(clipped_cosine)))
+
+
+def is_direction_consistent(candidate_row: pd.Series, track_state: dict) -> bool:
+    # 判断候选延续方向是否平滑
+    turn_angle = calculate_direction_change(candidate_row, track_state)
+    return turn_angle <= MAX_DIRECTION_CHANGE_DEG
+
+
 def find_track_match(frame_candidates: pd.DataFrame, track_state: dict, used_indices: set) -> int | None:
     # 选择当前航迹的最近邻候选
     best_index = None
@@ -157,7 +202,16 @@ def find_track_match(frame_candidates: pd.DataFrame, track_state: dict, used_ind
             continue
         distance = candidate_distance(candidate_row, track_state)
         velocity_diff = abs(float(candidate_row["mean_velocity"] - track_state["last_velocity"]))
-        if distance <= best_distance and velocity_diff <= MAX_VELOCITY_DIFF_KMH:
+        vector_velocity_diff = np.hypot(
+            float(candidate_row["mean_vx"] - track_state["last_vx"]),
+            float(candidate_row["mean_vy"] - track_state["last_vy"]),
+        )
+        if (
+            distance <= best_distance
+            and velocity_diff <= MAX_VELOCITY_DIFF_KMH
+            and vector_velocity_diff <= MAX_VECTOR_VELOCITY_DIFF_KMH
+            and is_direction_consistent(candidate_row, track_state)
+        ):
             best_index = candidate_index
             best_distance = distance
     return best_index
@@ -186,10 +240,14 @@ def link_tracks(cluster_table: pd.DataFrame) -> pd.DataFrame:
             matched_row["track_id"] = track_state["track_id"]
             track_rows.append(matched_row)
             used_indices.add(best_index)
+            track_state["previous_x"] = track_state["last_x"]
+            track_state["previous_y"] = track_state["last_y"]
             track_state["last_frame"] = int(matched_row["frame_idx"])
             track_state["last_x"] = float(matched_row["center_x"])
             track_state["last_y"] = float(matched_row["center_y"])
             track_state["last_velocity"] = float(matched_row["mean_velocity"])
+            track_state["last_vx"] = float(matched_row["mean_vx"])
+            track_state["last_vy"] = float(matched_row["mean_vy"])
 
         for candidate_index, candidate_row in frame_candidates.iterrows():
             if candidate_index in used_indices:
@@ -201,9 +259,13 @@ def link_tracks(cluster_table: pd.DataFrame) -> pd.DataFrame:
                 {
                     "track_id": next_track_id,
                     "last_frame": int(candidate_row["frame_idx"]),
+                    "previous_x": None,
+                    "previous_y": None,
                     "last_x": float(candidate_row["center_x"]),
                     "last_y": float(candidate_row["center_y"]),
                     "last_velocity": float(candidate_row["mean_velocity"]),
+                    "last_vx": float(candidate_row["mean_vx"]),
+                    "last_vy": float(candidate_row["mean_vy"]),
                 }
             )
             next_track_id += 1
@@ -220,6 +282,24 @@ def link_tracks(cluster_table: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(track_rows)[TRACK_RESULT_COLUMNS]
 
 
+def calculate_track_turn_angles(coordinate_values: np.ndarray) -> list[float]:
+    # 计算整条航迹的有效转向角
+    if len(coordinate_values) < 3:
+        return []
+
+    step_vectors = np.diff(coordinate_values, axis=0)
+    turn_angles = []
+    for previous_step, current_step in zip(step_vectors[:-1], step_vectors[1:]):
+        previous_distance = float(np.linalg.norm(previous_step))
+        current_distance = float(np.linalg.norm(current_step))
+        if previous_distance < MIN_DIRECTION_STEP_KM or current_distance < MIN_DIRECTION_STEP_KM:
+            continue
+        cosine_value = float(np.dot(previous_step, current_step) / (previous_distance * current_distance))
+        clipped_cosine = float(np.clip(cosine_value, -1.0, 1.0))
+        turn_angles.append(float(np.degrees(np.arccos(clipped_cosine))))
+    return turn_angles
+
+
 def summarize_tracks(confirmed_tracks: pd.DataFrame) -> pd.DataFrame:
     # 汇总确认航迹的关键指标
     if confirmed_tracks.empty:
@@ -233,6 +313,8 @@ def summarize_tracks(confirmed_tracks: pd.DataFrame) -> pd.DataFrame:
             end_frame=("frame_idx", "max"),
             mean_snr=("mean_snr", "mean"),
             mean_velocity=("mean_velocity", "mean"),
+            mean_vx=("mean_vx", "mean"),
+            mean_vy=("mean_vy", "mean"),
             mean_point_count=("point_count", "mean"),
             start_x=("center_x", "first"),
             start_y=("center_y", "first"),
@@ -253,6 +335,7 @@ def summarize_tracks(confirmed_tracks: pd.DataFrame) -> pd.DataFrame:
         path_length = float(step_distances.sum())
         displacement = float(np.linalg.norm(coordinate_values[-1] - coordinate_values[0]))
         straightness = displacement / path_length if path_length > 0 else 0.0
+        turn_angles = calculate_track_turn_angles(coordinate_values)
         quality_rows.append(
             {
                 "track_id": track_id,
@@ -260,6 +343,7 @@ def summarize_tracks(confirmed_tracks: pd.DataFrame) -> pd.DataFrame:
                 "straightness": straightness,
                 "mean_step": float(step_distances.mean()) if len(step_distances) else 0.0,
                 "max_step": float(step_distances.max()) if len(step_distances) else 0.0,
+                "max_turn_angle": float(max(turn_angles)) if turn_angles else 0.0,
             }
         )
     quality_table = pd.DataFrame(quality_rows)
@@ -276,6 +360,7 @@ def filter_track_summary(track_summary: pd.DataFrame) -> pd.DataFrame:
         (track_summary["straightness"] >= MIN_TRACK_STRAIGHTNESS)
         & (track_summary["max_step"] <= MAX_TRACK_STEP_KM)
         & (track_summary["mean_step"] <= MAX_MEAN_TRACK_STEP_KM)
+        & (track_summary["max_turn_angle"] <= MAX_DIRECTION_CHANGE_DEG)
     )
     return track_summary[quality_mask].copy()
 

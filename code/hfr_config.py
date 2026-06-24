@@ -69,20 +69,26 @@ DBSCAN_MIN_SAMPLES = 4
 MIN_CLUSTER_SIZE = 5
 # 单帧展示帧来源：该帧有较清晰候选点簇
 DISPLAY_FRAME_ID = 42
-# 航迹关联距离来源：相邻帧候选中心最大允许距离
-MAX_LINK_DISTANCE_KM = 12.0
+# 航迹关联距离来源：相邻帧一分钟间隔下的候选中心关联门
+MAX_LINK_DISTANCE_KM = 5.0
 # 航迹关联速度差来源：相邻帧径向速度最大允许差
-MAX_VELOCITY_DIFF_KMH = 25.0
+MAX_VELOCITY_DIFF_KMH = 15.0
+# 航迹关联速度矢量差来源：约束xy速度分量突变
+MAX_VECTOR_VELOCITY_DIFF_KMH = 8.0
+# 航迹方向最小步长来源：过短中心位移不参与方向判决
+MIN_DIRECTION_STEP_KM = 0.25
+# 航迹方向变化阈值来源：过滤相邻帧明显反向跳接
+MAX_DIRECTION_CHANGE_DEG = 125.0
 # 航迹最大断帧来源：本实验只关联相邻帧候选
 MAX_TRACK_GAP_FRAMES = 1
 # 确认航迹长度来源：过滤短寿命候选
 MIN_TRACK_LENGTH = 5
 # 确认航迹直线性来源：过滤往返跳动明显的候选链
-MIN_TRACK_STRAIGHTNESS = 0.50
+MIN_TRACK_STRAIGHTNESS = 0.60
 # 确认航迹最大步长来源：过滤相邻帧中心突跳
-MAX_TRACK_STEP_KM = 3.00
+MAX_TRACK_STEP_KM = 2.00
 # 确认航迹平均步长来源：过滤整体跳动偏大的候选链
-MAX_MEAN_TRACK_STEP_KM = 1.50
+MAX_MEAN_TRACK_STEP_KM = 1.00
 
 
 def ensure_output_dirs() -> None:
