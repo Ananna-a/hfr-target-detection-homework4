@@ -77,6 +77,10 @@ MIN_CLUSTER_SIZE = 5
 DISPLAY_FRAME_ID = 42
 # 航迹关联距离来源：相邻帧一分钟间隔下的候选中心关联门
 MAX_LINK_DISTANCE_KM = 5.0
+# 航迹预测时间间隔来源：本数据相邻帧时间间隔为60秒
+TRACK_FRAME_INTERVAL_SECONDS = 60.0
+# 小时换算来源：速度单位为km/h
+SECONDS_PER_HOUR = 3600.0
 # 航迹关联速度差来源：相邻帧径向速度最大允许差
 MAX_VELOCITY_DIFF_KMH = 15.0
 # 航迹关联速度矢量差来源：约束xy速度分量突变

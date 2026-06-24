@@ -23,11 +23,13 @@ from hfr_config import (
     MIN_TRACK_LENGTH,
     MIN_TRACK_STRAIGHTNESS,
     RESULT_DIR,
+    SECONDS_PER_HOUR,
     SIGNAL_SCORE_MIN,
     SNR_QUANTILE,
     SNR_SCALE_DB,
     SPACE_SCALE_KM,
     TABLE_DIR,
+    TRACK_FRAME_INTERVAL_SECONDS,
     VELOCITY_SCALE_KMH,
     ensure_output_dirs,
     load_point_table,
@@ -81,6 +83,28 @@ TRACK_SUMMARY_COLUMNS = [
     "max_step",
     "max_turn_angle",
 ]
+# 航迹允许跨帧来源：断帧数加当前关联帧
+MAX_TRACK_FRAME_STEP = MAX_TRACK_GAP_FRAMES + 1
+# 加权中心基准来源：保证权重为正
+CLUSTER_WEIGHT_EPS = 1e-6
+
+
+def calculate_signal_weights(cluster_table: pd.DataFrame) -> np.ndarray:
+    # 计算候选簇内点迹信号权重
+    snr_values = cluster_table["snr"].to_numpy(dtype=float)
+    amp_values = cluster_table["amp"].to_numpy(dtype=float)
+    snr_weights = snr_values - np.nanmin(snr_values) + CLUSTER_WEIGHT_EPS
+    amp_weights = amp_values - np.nanmin(amp_values) + CLUSTER_WEIGHT_EPS
+    signal_weights = snr_weights + amp_weights
+    if not np.isfinite(signal_weights).all() or float(signal_weights.sum()) <= 0:
+        return np.ones(len(cluster_table), dtype=float)
+    return signal_weights
+
+
+def weighted_mean(cluster_table: pd.DataFrame, column_name: str, weights: np.ndarray) -> float:
+    # 计算指定字段加权均值
+    column_values = cluster_table[column_name].to_numpy(dtype=float)
+    return float(np.average(column_values, weights=weights))
 
 
 def select_strong_points(frame_table: pd.DataFrame) -> pd.DataFrame:
@@ -156,18 +180,19 @@ def detect_frame_clusters(frame_table: pd.DataFrame) -> tuple[pd.DataFrame, list
         cluster_table = strong_points[strong_points["cluster_id"] == cluster_id]
         if len(cluster_table) < MIN_CLUSTER_SIZE:
             continue
+        signal_weights = calculate_signal_weights(cluster_table)
         cluster_rows.append(
             {
                 "frame_idx": int(cluster_table["frame_idx"].iloc[0]),
                 "cluster_id": int(cluster_id),
                 "point_count": int(len(cluster_table)),
-                "center_x": float(cluster_table["x"].mean()),
-                "center_y": float(cluster_table["y"].mean()),
-                "center_lon": float(cluster_table["lon"].mean()),
-                "center_lat": float(cluster_table["lat"].mean()),
-                "mean_velocity": float(cluster_table["velocity"].mean()),
-                "mean_vx": float(cluster_table["vx"].mean()),
-                "mean_vy": float(cluster_table["vy"].mean()),
+                "center_x": weighted_mean(cluster_table, "x", signal_weights),
+                "center_y": weighted_mean(cluster_table, "y", signal_weights),
+                "center_lon": weighted_mean(cluster_table, "lon", signal_weights),
+                "center_lat": weighted_mean(cluster_table, "lat", signal_weights),
+                "mean_velocity": weighted_mean(cluster_table, "velocity", signal_weights),
+                "mean_vx": weighted_mean(cluster_table, "vx", signal_weights),
+                "mean_vy": weighted_mean(cluster_table, "vy", signal_weights),
                 "mean_snr": float(cluster_table["snr"].mean()),
                 "mean_amp": float(cluster_table["amp"].mean()),
                 "score": float(cluster_table["snr"].mean() + np.log1p(len(cluster_table))),
@@ -190,9 +215,13 @@ def detect_all_clusters(point_table: pd.DataFrame) -> tuple[pd.DataFrame, pd.Dat
 
 
 def candidate_distance(candidate_row: pd.Series, track_state: dict) -> float:
-    # 计算候选簇与航迹末端距离
-    delta_x = float(candidate_row["center_x"] - track_state["last_x"])
-    delta_y = float(candidate_row["center_y"] - track_state["last_y"])
+    # 计算候选簇与航迹预测位置距离
+    frame_step = int(candidate_row["frame_idx"] - track_state["last_frame"])
+    elapsed_hours = frame_step * TRACK_FRAME_INTERVAL_SECONDS / SECONDS_PER_HOUR
+    predicted_x = float(track_state["last_x"] + track_state["last_vx"] * elapsed_hours)
+    predicted_y = float(track_state["last_y"] + track_state["last_vy"] * elapsed_hours)
+    delta_x = float(candidate_row["center_x"] - predicted_x)
+    delta_y = float(candidate_row["center_y"] - predicted_y)
     return float(np.hypot(delta_x, delta_y))
 
 
@@ -256,7 +285,7 @@ def find_track_match(frame_candidates: pd.DataFrame, track_state: dict, used_ind
 
 
 def link_tracks(cluster_table: pd.DataFrame) -> pd.DataFrame:
-    # 使用最近邻逻辑关联相邻帧候选簇
+    # 使用预测位置和最近邻逻辑关联候选簇
     if cluster_table.empty:
         return pd.DataFrame()
 
@@ -269,7 +298,8 @@ def link_tracks(cluster_table: pd.DataFrame) -> pd.DataFrame:
         used_indices = set()
 
         for track_state in active_tracks:
-            if frame_idx - track_state["last_frame"] != 1:
+            frame_step = int(frame_idx - track_state["last_frame"])
+            if frame_step < 1 or frame_step > MAX_TRACK_FRAME_STEP:
                 continue
             best_index = find_track_match(frame_candidates, track_state, used_indices)
             if best_index is None:
@@ -312,7 +342,7 @@ def link_tracks(cluster_table: pd.DataFrame) -> pd.DataFrame:
         active_tracks = [
             track_state
             for track_state in active_tracks
-            if frame_idx - track_state["last_frame"] <= MAX_TRACK_GAP_FRAMES
+            if frame_idx - track_state["last_frame"] <= MAX_TRACK_FRAME_STEP
         ]
 
     if not track_rows:

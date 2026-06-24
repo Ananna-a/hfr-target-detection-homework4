@@ -91,6 +91,10 @@ MULTI_FRAME_LEGEND_Y = 0.985
 METRIC_BAR_WIDTH = 0.58
 # 指标文字偏移来源：避免贴住柱顶
 METRIC_LABEL_PADDING = 0.04
+# 无有效转向角标注高度来源：避免贴住横轴
+TURN_NOTE_Y_DEG = 8.0
+# 无有效转向角标注文字来源：说明短位移不参与角度计算
+TURN_NOTE_TEXT = "短步长未计"
 # 候选簇中心点大小来源：全局候选分布展示
 CLUSTER_CENTER_POINT_SIZE = 18
 # 确认航迹全局线宽来源：突出最终保留航迹
@@ -589,6 +593,7 @@ def summarize_track_quality(track_table: pd.DataFrame) -> pd.DataFrame:
                 "mean_step": float(step_distances.mean()) if len(step_distances) else 0.0,
                 "max_step": float(step_distances.max()) if len(step_distances) else 0.0,
                 "max_turn_angle": float(max(turn_angles)) if turn_angles else 0.0,
+                "turn_angle_count": int(len(turn_angles)),
             }
         )
     return pd.DataFrame(quality_rows)
@@ -692,6 +697,19 @@ def plot_track_quality(track_table: pd.DataFrame) -> None:
     axes[2].set_title("最大转向角", pad=5)
     axes[2].set_ylabel("angle / deg")
     axes[2].grid(axis="y", alpha=0.28)
+    for track_index, turn_angle_count in enumerate(display_quality["turn_angle_count"]):
+        # 标注没有有效转向角的航迹
+        if int(turn_angle_count) == 0:
+            axes[2].text(
+                track_index,
+                TURN_NOTE_Y_DEG,
+                TURN_NOTE_TEXT,
+                ha="center",
+                va="bottom",
+                color=NEUTRAL_DARK,
+                fontsize=6.8,
+                rotation=90,
+            )
     axes[2].legend(frameon=False)
     save_figure(figure, "图7_航迹质量评价.png")
 

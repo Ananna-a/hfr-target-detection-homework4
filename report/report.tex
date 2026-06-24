@@ -70,20 +70,39 @@
 }
 
 % 设置目录格式
-\renewcommand{\contentsname}{\zihao{3}\heiti 目\quad 录}
-\renewcommand{\cfttoctitlefont}{\hfill\zihao{3}\heiti}
-\renewcommand{\cftaftertoctitle}{\hfill}
-\renewcommand{\cftsecfont}{\songti\zihao{-4}}
-\renewcommand{\cftsubsecfont}{\songti\zihao{-4}}
-\renewcommand{\cftsecpagefont}{\songti\zihao{-4}\mdseries}
-\renewcommand{\cftsubsecpagefont}{\songti\zihao{-4}\mdseries}
+\renewcommand{\contentsname}{}
+\renewcommand{\cfttoctitlefont}{}
+\renewcommand{\cftaftertoctitle}{}
+\renewcommand{\cftsecfont}{\songti\zihao{4}\mdseries}
+\renewcommand{\cftsubsecfont}{\songti\zihao{4}\mdseries}
+\renewcommand{\cftsubsubsecfont}{\songti\zihao{4}\mdseries}
+\renewcommand{\cftsecpagefont}{\songti\zihao{4}\mdseries}
+\renewcommand{\cftsubsecpagefont}{\songti\zihao{4}\mdseries}
+\renewcommand{\cftsubsubsecpagefont}{\songti\zihao{4}\mdseries}
 \renewcommand{\cftsecleader}{\cftdotfill{\cftdotsep}}
+\renewcommand{\cftsubsecleader}{\cftdotfill{\cftdotsep}}
+\renewcommand{\cftsubsubsecleader}{\cftdotfill{\cftdotsep}}
 \setlength{\cftbeforetoctitleskip}{0pt}
-\setlength{\cftaftertoctitleskip}{0.8em}
+\setlength{\cftaftertoctitleskip}{0pt}
 \setlength{\cftbeforesecskip}{0.45em}
 \setlength{\cftbeforesubsecskip}{0.15em}
-\cftsetindents{section}{0em}{2.2em}
-\cftsetindents{subsection}{2.0em}{3.0em}
+\setlength{\cftbeforesubsubsecskip}{0.1em}
+\makeatletter
+\newcommand{\customtocline}[5]{%
+  \par\addvspace{#5}%
+  \noindent\hspace*{#1}{%
+    \songti\zihao{4}\mdseries
+    \def\numberline##1{\makebox[#2][l]{##1}}%
+    #3\nobreak\leaders\hbox to 0.8em{\hss.\hss}\hfill\nobreak
+    \makebox[1.8em][r]{#4}%
+  }%
+  \par
+}
+\renewcommand*\l@section[2]{\customtocline{0em}{2.8em}{#1}{#2}{0.45em}}
+\renewcommand*\l@subsection[2]{\customtocline{2.2em}{3.4em}{#1}{#2}{0.15em}}
+\renewcommand*\l@subsubsection[2]{\customtocline{4.4em}{4.2em}{#1}{#2}{0.1em}}
+\newcommand{\printtocentries}{\@starttoc{toc}}
+\makeatother
 
 % 设置图表格式
 \renewcommand{\figurename}{图}
@@ -123,7 +142,13 @@
 % 生成目录页
 \pagenumbering{Roman}
 \thispagestyle{plain}
-\tableofcontents
+{\onehalfspacing
+\begin{center}
+  {\heiti\zihao{2}目\quad 录}
+\end{center}
+\vspace{0.4em}
+{\songti\zihao{4}\printtocentries}
+}
 
 \newpage
 \pagenumbering{arabic}
@@ -133,7 +158,7 @@
 
 \subsection{工作原理}
 
-高频地波雷达通常工作在 3--30 MHz 频段。该频段电磁波能够沿导电海面发生绕射传播，因此可以突破普通微波雷达的视距限制，对远距离海域进行连续观测。雷达发射高频电磁波后，海面、船舶和环境散射体会产生回波。接收端经过混频、采样、距离向处理、速度向处理和方位向处理后，可得到距离、径向速度、方位角、幅度和信噪比等点迹信息。
+高频地波雷达通常工作在 3--30 MHz 频段，属于高频超视距雷达的一类。该频段电磁波能够沿导电海面发生绕射传播，采用垂直极化天线时地波衰减相对较小，因此可以突破普通微波雷达的视距限制，对远距离海域进行连续观测。雷达发射高频电磁波后，海面、船舶和环境散射体会产生回波。接收端经过混频、采样、距离向处理、速度向处理和方位向处理后，可得到距离、径向速度、方位角、幅度和信噪比等点迹信息。
 
 距离观测由电磁波往返传播时间决定。设电磁波传播速度为 \(c\)，目标距离为 \(R\)，回波时延为 \(\tau\)，则有
 \begin{equation}
@@ -152,6 +177,8 @@
 \end{equation}
 因此，数据中的速度字段本质上反映目标沿雷达到目标连线方向的速度分量，而不是完整二维速度。
 
+从目标探测角度看，海上目标能够被高频地波雷达稳定发现通常需要满足两个基本条件：一是目标具有足够大的雷达散射截面，能够在海杂波和环境干扰背景中形成可检测回波；二是目标相对于雷达具有一定径向运动速度，使目标回波在多普勒域中与零多普勒附近的强背景分量分离。若目标回波弱或径向速度过小，即使空间位置上有点迹，也可能难以从海杂波背景中可靠确认。
+
 方位估计主要依靠阵列接收信号之间的相位差和数字波束形成。若距离为 \(r\)，方位角为 \(\theta\)，则在局部平面坐标中可近似表示为
 \begin{equation}
   x = r\sin\theta,\qquad y = r\cos\theta.
@@ -161,7 +188,7 @@
 
 \subsection{信号处理流程}
 
-从原始回波到点迹数据，一般需要经历距离、速度、方位和检测等多个环节。本文可将高频地波雷达目标探测流程概括为图 \ref{fig:radar_pipeline}。
+从原始回波到点迹数据，一般需要经历距离、速度、杂波抑制、检测、方位估计和跟踪等多个环节。工程处理中，地波雷达通常先对多通道阵列回波进行距离和多普勒处理，形成距离--多普勒谱，再进行海杂波、射频干扰和电离层杂波抑制，随后通过 CFAR 检测和参数估计输出目标点迹。本文可将高频地波雷达目标探测流程概括为图 \ref{fig:radar_pipeline}。
 
 \begin{figure}[H]
   \centering
@@ -170,12 +197,14 @@
     \node[data] (echo) {海面与目标\\混合回波};
     \node[block,right=of echo] (range) {距离向处理\\估计距离};
     \node[block,right=of range] (doppler) {速度向处理\\估计多普勒};
-    \node[block,right=of doppler] (beam) {方位向处理\\数字波束形成};
+    \node[block,right=of doppler] (suppress) {杂波干扰\\抑制};
+    \node[block,right=of suppress] (beam) {方位向处理\\数字波束形成};
     \node[judge,right=of beam] (detect) {门限检测\\形成点迹};
     \node[data,right=of detect] (plots) {点迹数据\\后处理输入};
     \draw[arrow] (echo) -- (range);
     \draw[arrow] (range) -- (doppler);
-    \draw[arrow] (doppler) -- (beam);
+    \draw[arrow] (doppler) -- (suppress);
+    \draw[arrow] (suppress) -- (beam);
     \draw[arrow] (beam) -- (detect);
     \draw[arrow] (detect) -- (plots);
   \end{tikzpicture}
@@ -184,13 +213,13 @@
   \label{fig:radar_pipeline}
 \end{figure}
 
-需要说明的是，本次实验使用的 \texttt{HFRData.mat} 已经不是最底层的原始回波数据，而是经过雷达前端初步处理后的点迹数据。因此，本文的重点不是重新实现距离--多普勒谱上的原始 CFAR 检测，而是在点迹数据基础上继续进行目标候选筛选、空间速度聚类和多帧连续性确认。
+需要说明的是，本次实验使用的 \texttt{HFRData.mat} 已经不是最底层的原始回波或距离--多普勒谱数据，而是经过雷达前端初步处理后的点迹数据。因此，本文的重点不是重新实现海杂波抑制、射频干扰抑制、电离层杂波抑制和谱级 CFAR 检测，而是在已有点迹基础上继续进行目标候选筛选、空间速度聚类和多帧连续性确认。
 
 \subsection{技术特点}
 
 高频地波雷达的主要优点是探测距离远、覆盖范围广、可对海面目标和海流信息进行连续观测。与普通视距雷达相比，地波传播使其适合海上大范围监测；与单帧成像类传感器相比，雷达还能提供速度、多普勒和时间连续性信息。
 
-但高频地波雷达也存在明显限制。首先，海浪和海流会产生大范围强杂波，点迹背景常呈条带状或扇区状分布；其次，目标回波可能较弱，在单帧中不一定形成稳定聚集；再次，点迹数据通常缺少人工真值或 AIS 对照，难以直接计算严格意义上的准确率、召回率和 F1 值。因此，本文采用无监督质量评价，重点考察候选簇是否连续出现、航迹是否平滑、相邻帧跳变是否可控。
+但高频地波雷达也存在明显限制。首先，海浪的一阶和二阶 Bragg 散射会形成强海杂波，一阶海杂波可能抬高检测基底，造成虚警或漏警；其次，高频雷达与其他射频信号共用 3--30 MHz 频带，容易受到射频干扰，同时电离层反射和散射也可能在距离和多普勒域产生展宽杂波；再次，目标回波可能较弱，在单帧中不一定形成稳定聚集。由于本次点迹数据缺少人工真值或 AIS 对照，难以直接计算严格意义上的准确率、召回率和 F1 值。因此，本文采用无监督质量评价，重点考察候选簇是否连续出现、航迹是否平滑、相邻帧跳变是否可控。
 
 \section{地波雷达目标跟踪方法}
 
@@ -221,7 +250,7 @@
   \label{eq:cfar_alpha}
 \end{equation}
 
-由于本文数据已经是点迹，无法直接在原始距离--多普勒谱上重新进行 CFAR。本文将 CFAR 的局部自适应思想迁移到点迹层面：每帧先按信噪比和幅度筛选较强点，再按距离分区修正局部门限，最后用空间、速度和信号强度特征进行密度聚类。
+在完整地波雷达处理中，CFAR 检测通常可分别在距离向和多普勒向进行，再综合两个维度的检测结果并通过峰值检测输出目标候选。常见方法包括 CA-CFAR、OS-CFAR 和自适应回归类 CFAR。由于本文数据已经是点迹，无法直接在原始距离--多普勒谱上重新进行谱级 CFAR。本文将 CFAR 的局部自适应思想迁移到点迹层面：每帧先按信噪比和幅度筛选较强点，再按距离分区修正局部门限，最后用空间、速度和信号强度特征进行密度聚类。
 
 \subsection{方法流程}
 
@@ -292,16 +321,35 @@
   N_{\varepsilon}(q_i)=\{q_j\mid \|q_i-q_j\|\le \varepsilon\}.
   \label{eq:dbscan}
 \end{equation}
-当 \(|N_{\varepsilon}(q_i)|\ge \mathrm{min\_samples}\) 时，\(q_i\) 为核心点。本文采用 \(\varepsilon=1.10\)、\(\mathrm{min\_samples}=4\)，并要求候选簇点数不少于 5。
+当 \(|N_{\varepsilon}(q_i)|\ge \mathrm{min\_samples}\) 时，\(q_i\) 为核心点。本文采用 \(\varepsilon=1.10\)、\(\mathrm{min\_samples}=4\)，并要求候选簇点数不少于 5。对每个候选簇，本文不再简单采用簇内点迹坐标的算术平均，而是根据信噪比和幅度构造正权重，并对位置、经纬度和速度进行加权平均：
+\begin{equation}
+  w_i =
+  \left(\mathrm{snr}_i-\min(\mathrm{snr})+\epsilon\right)
+  +
+  \left(A_i-\min(A)+\epsilon\right),
+  \qquad
+  \bar{\mathbf{p}}=\frac{\sum_i w_i\mathbf{p}_i}{\sum_i w_i}.
+  \label{eq:weighted_center}
+\end{equation}
+这样可以使簇中心更多受强回波点影响，减少弱散点对候选中心的扰动。
 
 \subsubsection{多帧关联与航迹确认}
 
-对每帧得到的候选簇，本文使用相邻帧最近邻规则进行关联。设已有航迹末端中心为 \((x_{t-1},y_{t-1})\)，当前候选中心为 \((x_t,y_t)\)，则关联距离为
+雷达目标跟踪通常包含航迹起始、航迹维持和航迹终止三个阶段，其中航迹维持需要不断进行状态预测、数据关联和状态更新。受限于本次作业数据规模和课程要求，本文没有建立完整卡尔曼滤波状态空间模型，而采用逻辑法思想：未被关联的候选簇可形成新航迹头，已有航迹在后续帧中寻找满足距离、速度和方向门限的候选簇。考虑到单帧候选可能短暂缺失，本文允许最多断开 1 帧后继续关联。该过程相当于使用一个简化的跟踪门，将不可能属于同一目标的候选簇排除，再在门内采用最近邻关联。
+
+对每帧得到的候选簇，本文使用预测位置最近邻规则进行关联。设已有航迹末端中心为 \((x_{t-1},y_{t-1})\)，当前候选中心为 \((x_t,y_t)\)。为了避免直接用上一帧旧位置进行关联，本文先利用上一帧候选中心和速度分量构造短时预测位置。设相隔帧数为 \(\Delta k\)，相邻帧时间间隔为 \(\Delta t=60\ \mathrm{s}\)，则
 \begin{equation}
-  d_t=\sqrt{(x_t-x_{t-1})^2+(y_t-y_{t-1})^2}.
+  \hat{x}_t=x_{t-1}+v_{x,t-1}\frac{\Delta k\Delta t}{3600},
+  \qquad
+  \hat{y}_t=y_{t-1}+v_{y,t-1}\frac{\Delta k\Delta t}{3600}.
+  \label{eq:predicted_position}
+\end{equation}
+关联距离定义为当前候选中心与预测位置之间的距离：
+\begin{equation}
+  d_t=\sqrt{(x_t-\hat{x}_t)^2+(y_t-\hat{y}_t)^2}.
   \label{eq:link_distance}
 \end{equation}
-若 \(d_t\le 5.0\ \mathrm{km}\)，且径向速度差不超过 \(15.0\ \mathrm{km/h}\)，\(v_x,v_y\) 合成速度差不超过 \(8.0\ \mathrm{km/h}\)，则进入方向一致性判别。
+若 \(d_t\le 5.0\ \mathrm{km}\)，且径向速度差不超过 \(15.0\ \mathrm{km/h}\)，\(v_x,v_y\) 合成速度差不超过 \(8.0\ \mathrm{km/h}\)，则认为当前候选落入简化跟踪门，并进入方向一致性判别。
 
 连续两段中心位移向量分别为 \(\Delta\mathbf{p}_{t-1}\) 和 \(\Delta\mathbf{p}_t\)，转向角定义为
 \begin{equation}
@@ -314,6 +362,8 @@
   \label{eq:turn_angle}
 \end{equation}
 当相邻位移小于 0.25 km 时，不使用转向角判据，以避免短位移抖动放大角度误差；否则要求 \(\phi_t\le 125^\circ\)。
+
+最近邻关联计算简单，适合课程作业中的点迹级后处理，但其局限也很明显：当同一跟踪门内存在多个背景候选或多个目标相互接近时，距离最近的候选不一定是真实目标回波，可能导致误关联或丢跟。因此，本文在最近邻关联之后继续使用长度、直线性、步长和转向角进行质量确认。
 
 航迹确认采用长度和形态质量共同约束。候选航迹至少持续 4 帧，且满足
 \begin{equation}
@@ -357,7 +407,7 @@
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.72\textwidth]{图2_点迹空间分布.png}
+  \includegraphics[width=0.55\textwidth]{图2_点迹空间分布.png}
   \caption{全部点迹空间分布}
   \label{fig:spatial_distribution}
 \end{figure}
@@ -383,48 +433,62 @@
 
 \subsubsection{候选检测与确认航迹}
 
-图 \ref{fig:multi_frame_detection} 展示了确认航迹相关帧中的单帧候选检测结果。每帧先保留信号较强点，再通过 DBSCAN 得到候选簇中心。图 \ref{fig:global_tracks} 进一步把全部候选簇中心和最终确认航迹叠加到全局点迹背景上。可以看到，最终确认航迹只占全部点迹空间中的一小部分，这是由多帧连续性和形态质量共同筛选的结果，并不表示其他区域没有点迹。
+在完成强点筛选后，需要先观察单帧内候选簇是否能够稳定出现。图 \ref{fig:multi_frame_detection} 选取了最终确认航迹相关的 4 个代表帧，展示从原始点迹、候选点到候选中心的单帧检测结果。每个子图采用相同坐标范围，因此可以直接比较候选簇在不同帧之间的位置变化。
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.92\textwidth]{图3_多帧候选检测.png}
+  \includegraphics[width=0.72\textwidth]{图3_多帧候选检测.png}
   \caption{多帧候选检测结果}
   \label{fig:multi_frame_detection}
 \end{figure}
 
+由图 \ref{fig:multi_frame_detection} 可见，候选点并不是在整幅观测区域内随机保留，而是在若干局部位置形成相对紧凑的小簇。对于 T20 相关帧，候选中心主要出现在 \(y\approx 25\)--28 km 附近；对于 T36 相关帧，候选中心分布在 \(y\approx 9\)--12 km 附近，并通过断帧重连形成更长的连续候选链。单帧候选只能说明该帧存在可疑点簇，还不能直接称为航迹，必须继续进行多帧关联。
+
+为了判断这些单帧候选在全局空间中的相对位置，图 \ref{fig:global_tracks} 将全部候选簇中心和最终确认航迹叠加到全局点迹背景上。这样可以同时看到背景点迹、候选簇和确认航迹之间的关系。
+
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.72\textwidth]{图4_候选簇与确认航迹.png}
+  \includegraphics[width=0.55\textwidth]{图4_候选簇与确认航迹.png}
   \caption{候选簇空间分布与确认航迹}
   \label{fig:global_tracks}
 \end{figure}
 
-最终确认的两条疑似目标航迹分别为 T25 和 T44。图 \ref{fig:confirmed_tracks} 给出了两条航迹的局部放大结果。T25 出现在第 27--30 帧，持续 4 帧；T44 出现在第 41--46 帧，持续 6 帧。两条航迹均表现出连续中心移动，但 T44 中间存在一定折线变化，因此其直线性低于 T25。
+图 \ref{fig:global_tracks} 表明，最终确认航迹只占全部点迹空间中的一小部分。这不是因为其他区域没有点迹，而是因为候选簇还需要满足多帧连续性、速度一致性和形态质量约束。换言之，背景中大量点迹可以形成单帧候选，但只有少数候选链能够稳定延续。
+
+最终确认的三条疑似目标航迹分别为 T13、T20 和 T36。为了更清楚地观察这些航迹的局部形态，图 \ref{fig:confirmed_tracks} 给出了局部放大结果。
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.96\textwidth]{图5_确认航迹局部放大.png}
+  \includegraphics[width=0.90\textwidth]{图5_确认航迹局部放大.png}
   \caption{确认航迹局部放大}
   \label{fig:confirmed_tracks}
 \end{figure}
 
+从图 \ref{fig:confirmed_tracks} 可以看到，T20 出现在第 27--30 帧，持续 4 帧，中心点移动较平滑；T36 出现在第 41--49 帧，持续 8 个有效候选点，中间允许 1 帧短暂缺失后继续关联，因此比原先只看相邻帧的结果更完整；T13 出现在第 13--18 帧，虽然有效候选点数为 4，但存在断帧重连，直线性低于 T20 和 T36。上述差异需要在后续质量评价中进一步量化。
+
 \subsubsection{无监督质量评价}
 
-由于缺少 AIS 或人工标注真值，本文不计算准确率、召回率和 F1 值，而采用无监督质量评价。图 \ref{fig:funnel} 展示了候选筛选数量变化：从 90 个候选簇形成 52 条候选航迹，长度达标航迹为 3 条，最终质量确认航迹为 2 条。图 \ref{fig:quality} 展示了长度达标候选航迹的直线性、步长和最大转向角。
+由于缺少 AIS 或人工标注真值，本文不计算准确率、召回率和 F1 值，而采用无监督质量评价。首先从数量变化看，筛选流程应当能够减少明显不稳定的候选，同时保留少量可解释的疑似航迹。图 \ref{fig:funnel} 展示了候选筛选数量变化。
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.62\textwidth]{图6_候选筛选数量评价.png}
+  \includegraphics[width=0.7\textwidth]{图6_候选筛选数量评价.png}
   \caption{候选筛选数量变化}
   \label{fig:funnel}
 \end{figure}
 
+由图 \ref{fig:funnel} 可见，90 个候选簇经过预测位置关联后形成 44 条候选航迹，其中仅有 4 条达到最小持续帧数要求，最终通过质量确认的航迹为 3 条。这说明长度约束和形态质量约束对背景候选具有明显过滤作用，同时断帧重连避免了部分真实连续候选被拆成短链。
+
+进一步看质量指标，图 \ref{fig:quality} 对长度达标的 T13、T20、T36 和未确认候选进行对比，分别展示直线性、相邻帧步长和最大转向角。
+
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.92\textwidth]{图7_航迹质量评价.png}
+  \includegraphics[width=0.95\textwidth]{图7_航迹质量评价.png}
   \caption{航迹质量评价}
   \label{fig:quality}
 \end{figure}
+
+图 \ref{fig:quality} 显示，T13、T20 和 T36 的直线性均高于确认阈值，且最大步长与平均步长没有同时越界。需要注意的是，T13 的最大转向角在图中标注为“短步长未计”，这是因为其相邻候选中心中存在小于 0.25 km 的短位移段，算法不使用这类短位移计算转向角，以避免角度被微小抖动放大；未确认候选虽然长度达标，但在直线性、步长或转向角上存在更明显的不稳定特征，因此不作为最终确认结果。表 \ref{tab:track_summary} 进一步列出最终保留的三条确认航迹的主要数值。
 
 \begin{table}[H]
   \centering
@@ -434,38 +498,55 @@
     \toprule
     航迹 & 帧数 & 起止帧 & 平均 SNR & 平均速度 & 位移 & 路径长 & 直线性 & 最大步长 \\
     \midrule
-    T25 & 4 & F27--F30 & 13.92 & 15.99 & 2.89 & 2.91 & 0.99 & 1.60 \\
-    T44 & 6 & F41--F46 & 13.56 & 24.25 & 2.54 & 3.24 & 0.78 & 1.07 \\
+    T13 & 4 & F13--F18 & 13.26 & 16.31 & 1.03 & 1.41 & 0.73 & 0.90 \\
+    T20 & 4 & F27--F30 & 13.92 & 16.15 & 2.54 & 2.56 & 0.99 & 1.10 \\
+    T36 & 8 & F41--F49 & 14.00 & 24.16 & 4.44 & 4.77 & 0.93 & 1.48 \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-从表 \ref{tab:track_summary} 可见，T25 的直线性为 0.99，说明其中心点几乎沿单调方向移动；T44 的直线性为 0.78，仍满足质量要求，但存在一定中心抖动。长度达标但未确认的 T46 直线性较低且最大步长偏大，因此更可能是背景点迹被连续关联形成的可疑链，不作为最终确认结果。
+从表 \ref{tab:track_summary} 可见，T20 的直线性为 0.99，说明其中心点几乎沿单调方向移动；T36 的直线性为 0.93，且持续有效候选点最多，是本次结果中较稳定的一条长航迹；T13 的直线性为 0.73，虽然低于前两条，但仍高于确认阈值，且步长指标处于允许范围内，因此作为疑似目标航迹保留。
 
 \subsubsection{参数敏感性分析}
 
-为评估候选提取条件是否过严或过松，本文比较了三类参数方案。第一类为原始全局强筛选，候选簇数较少，但对弱背景区域不够友好；第二类为直接放松全局阈值，候选数量明显增加，但最近邻关联更容易受到背景候选干扰；第三类为本文最终采用的距离分区补偿方案，候选数量适度增加，同时最终确认航迹数保持稳定。结果如表 \ref{tab:sensitivity} 所示。
+为评估参数选择是否过严或过松，本文不是只比较最终输出数量，而是按处理流程分层改变关键参数：单帧强点筛选、DBSCAN 聚类、多帧关联、长度判决和质量确认分别进行扰动。每次只改变同一阶段的一组参数，其余参数保持最终方案不变，从而观察该阶段对候选簇数量、候选航迹数量和最终确认结果的影响。结果如表 \ref{tab:sensitivity} 所示。
 
 \begin{table}[H]
   \centering
-  \caption{候选提取参数敏感性分析}
+  \caption{分层参数敏感性分析}
   \label{tab:sensitivity}
-  \begin{tabularx}{\textwidth}{lrrrrX}
+  \scriptsize
+  \setlength{\tabcolsep}{3pt}
+  \begin{tabularx}{\textwidth}{llXrrrrr}
     \toprule
-    方案 & 强点数 & 候选簇 & 候选航迹 & 确认航迹 & 说明 \\
+    方案 & 阶段 & 改变参数 & 强点数 & 候选簇 & 候选航迹 & 长度达标 & 质量确认 \\
     \midrule
-    全局严格筛选 & 2619 & 82 & 46 & 2 & 结果保守，但局部弱区域候选较少 \\
-    直接放松阈值 & 5255 & 129 & 79 & 2 & 候选显著增多，误关联风险升高 \\
-    距离分区补偿 & 3343 & 90 & 52 & 2 & 适度补充候选，最终结果稳定 \\
+    最终方案 & 基准 & 当前报告参数 & 3343 & 90 & 52 & 3 & 2 \\
+    强点筛选偏严 & 单帧筛选 & \(Q_{\mathrm{snr}}=0.90,Q_A=0.70,S_{\min}=1.85\) & 2431 & 67 & 35 & 5 & 3 \\
+    强点筛选偏松 & 单帧筛选 & \(Q_{\mathrm{snr}}=0.80,Q_A=0.60,S_{\min}=1.65\) & 4386 & 109 & 62 & 4 & 2 \\
+    聚类邻域偏小 & 单帧聚类 & \(\varepsilon=0.95\) & 3343 & 56 & 37 & 1 & 0 \\
+    聚类邻域偏大 & 单帧聚类 & \(\varepsilon=1.25,\) 最小簇点数为 4 & 3343 & 168 & 89 & 5 & 2 \\
+    关联门限偏严 & 多帧关联 & \(d_{\max}=4.0\ \mathrm{km},\Delta v_{xy}=6.0\ \mathrm{km/h},\phi_{\max}=105^\circ\) & 3343 & 90 & 53 & 3 & 2 \\
+    关联门限偏松 & 多帧关联 & \(d_{\max}=6.0\ \mathrm{km},\Delta v_{xy}=10.0\ \mathrm{km/h},\phi_{\max}=145^\circ\) & 3343 & 90 & 49 & 4 & 2 \\
+    长度要求偏短 & 长度判决 & 最小航迹长度为 3 帧 & 3343 & 90 & 52 & 6 & 2 \\
+    长度要求偏长 & 长度判决 & 最小航迹长度为 5 帧 & 3343 & 90 & 52 & 2 & 1 \\
+    质量确认偏严 & 质量确认 & 直线性 0.70，最大步长 1.50 km，平均步长 0.80 km，转向角 \(105^\circ\) & 3343 & 90 & 52 & 3 & 1 \\
+    质量确认偏松 & 质量确认 & 直线性 0.50，最大步长 2.50 km，平均步长 1.20 km，转向角 \(145^\circ\) & 3343 & 90 & 51 & 4 & 2 \\
     \bottomrule
   \end{tabularx}
 \end{table}
 
-该敏感性分析表明，候选提取不能简单地“越宽越好”。如果前端筛选过松，背景点迹会形成大量短寿命候选，反而可能干扰多帧关联；如果过严，则可能完全忽略局部弱信号区域。本文最终方案在候选数量和虚警控制之间取得折中，因此更适合作为课程作业中的可复现实验方案。
+表 \ref{tab:sensitivity} 表明，各阶段参数的作用并不相同。单帧强点筛选偏严时，强点数和候选簇数明显下降，但最终确认数反而可能增加，这说明过严筛选会改变候选簇组成，得到的航迹编号和最终方案并不能简单一一对应；单帧筛选偏松时，强点数增加到 4386，候选簇增加到 109，但最终确认数仍为 2，说明新增候选中有相当部分属于短寿命背景候选。
+
+DBSCAN 聚类邻域对结果更敏感。当 \(\varepsilon=0.95\) 时，候选簇减少到 56，长度达标航迹仅 1 条，最终没有航迹通过质量确认，说明聚类过紧会把原本连续的候选点簇拆散；当 \(\varepsilon=1.25\) 且最小簇点数降低为 4 时，候选簇增至 168，候选航迹增至 89，虽然仍有 2 条质量确认航迹，但背景候选明显膨胀，后续误关联风险增大。
+
+多帧关联门限在当前数据上表现相对稳定，偏严和偏松方案最终均保留 2 条质量确认航迹，但候选航迹数量和长度达标数量会发生变化。长度阈值则直接影响短航迹保留：最小长度降到 3 帧时，长度达标候选增加到 6 条，但质量确认仍为 2 条；最小长度升到 5 帧时，T25 这类 4 帧短航迹会被排除，最终确认数降为 1。因此，本文采用 4 帧作为折中，既避免大量 3 帧短链进入确认，又保留持续 4 分钟且形态稳定的疑似航迹。
+
+质量确认参数主要决定最终候选链是否足够平滑。偏严方案只保留 1 条航迹，说明其会漏掉短而可信的 T25；偏松方案虽然长度达标数量增加，但质量确认数没有增加，说明当前最终方案已经较好地过滤了跳变明显的 T46。因此，本文最终参数不是单纯追求更多航迹，而是在候选数量、连续性和形态稳定性之间取得折中。
 
 \subsubsection{结果边界与方法局限}
 
-本文结果应表述为“疑似目标航迹”或“目标候选”，不能表述为已验证船舶真实航迹。原因在于：第一，本数据没有 AIS 真值或人工标注；第二，当前算法基于点迹后处理，而不是原始距离--多普勒谱上的完整检测；第三，多帧关联采用简化最近邻规则，并未加入完整卡尔曼滤波、概率数据关联或多假设跟踪。
+本文结果应表述为“疑似目标航迹”或“目标候选”，不能表述为已验证船舶真实航迹。原因在于：第一，本数据没有 AIS 真值或人工标注；第二，当前算法基于点迹后处理，而不是原始距离--多普勒谱上的完整杂波抑制、CFAR 检测和参数估计流程；第三，多帧关联采用简化最近邻规则，并未加入完整状态预测、卡尔曼滤波、概率数据关联或多假设跟踪。
 
 对于图中较宽、较长的灰色点迹带，本文没有直接将其判定为航迹。这是因为这些区域虽然点迹密集，但多数点不满足“高信号、紧凑聚类、多帧连续和平滑移动”的联合条件。后续若需要进一步挖掘弱目标，可考虑引入 track-before-detect、卡尔曼预测门、AIS 对照验证或人工标注样本，以区分真实目标和背景杂波结构。
 

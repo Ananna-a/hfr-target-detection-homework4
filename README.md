@@ -11,6 +11,7 @@ code/
   02_detect_and_track.py  候选检测与多帧航迹确认
   03_make_figures.py      生成报告图件
   04_analyze_results.py   生成实验结果分析
+  05_sensitivity_analysis.py  生成参数敏感性分析
 
 report/
   目标检测原理与工作流程.md
@@ -44,13 +45,14 @@ python code\01_prepare_data.py
 python code\02_detect_and_track.py
 python code\03_make_figures.py
 python code\04_analyze_results.py
+python code\05_sensitivity_analysis.py
 ```
 
 运行后会生成：
 
 - `report/figures/`：报告图件，同时输出 PNG、SVG、PDF
 - `report/tables/`：清洗后的点迹表、数据摘要表和每帧统计表
-- `report/results/`：候选目标和确认航迹结果
+- `report/results/`：候选目标、确认航迹和敏感性分析结果
 - `report/实验结果分析.md`：实验结果的文字分析
 
 ## 方法概述
@@ -61,6 +63,6 @@ python code\04_analyze_results.py
 点迹数据 -> 时间字段重建 -> 数据清洗 -> 信噪比和幅度初筛 -> DBSCAN聚类 -> 多帧连续性与形态质量确认
 ```
 
-该流程不训练神经网络模型，重点是从点迹中提取目标候选，并通过多帧运动连续性、航迹直线性和相邻帧跳变约束降低虚警。报告图件保留点迹空间密度、点迹空间分布、多帧候选检测、全局候选簇、确认航迹和无监督质量评价图；多帧航迹确认结果同时采用表格审查，避免把跳变明显的候选链误读为真实航迹。
+该流程不训练神经网络模型，重点是从点迹中提取目标候选，并通过多帧运动连续性、航迹直线性和相邻帧跳变约束降低虚警。报告图件保留点迹空间分布、多帧候选检测、全局候选簇、确认航迹和无监督质量评价图；多帧航迹确认结果同时采用表格审查，避免把跳变明显的候选链误读为真实航迹。
 
 原始 `raw_unixtime` 存在多帧共用同一值的情况，但这些帧的点迹集合不同，因此项目保留全部帧，并使用帧头年月日时分秒重建逐帧时间。

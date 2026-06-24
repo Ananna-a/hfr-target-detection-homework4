@@ -13,9 +13,15 @@ __pycache__/
 .idea/
 .codex_tmp/
 
+# 本地环境与隐私配置
+.env
+.env.*
+*.local
+
 # 课程原始数据与资料
 点迹数据/
 学习资料/
+report/cankao/
 *.rar
 *.zip
 *.7z
@@ -31,6 +37,16 @@ report/results/*
 !report/tables/.gitkeep
 !report/results/.gitkeep
 !report/figures/*.pdf
+
+# LaTeX编译中间文件
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.synctex*
+*.fls
+*.fdb_latexmk
 
 # 系统文件
 .DS_Store
