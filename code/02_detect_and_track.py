@@ -2,48 +2,70 @@ import sys
 
 import numpy as np
 import pandas as pd
-from sklearn.cluster import DBSCAN
 
 from hfr_config import (
-    AMP_QUANTILE,
-    AMP_SCALE,
-    DBSCAN_EPS,
-    DBSCAN_MIN_SAMPLES,
-    KALMAN_ACCEL_STD_KMH2,
-    KALMAN_GATE_THRESHOLD,
-    KALMAN_INITIAL_VELOCITY_STD_KMH,
-    KALMAN_POSITION_NOISE_KM,
-    LOCAL_RANGE_BIN_COUNT,
-    LOCAL_RANGE_MIN_POINTS,
-    MAX_DIRECTION_CHANGE_DEG,
-    MAX_MEAN_TRACK_STEP_KM,
-    MAX_STEP_VELOCITY_KMH,
-    MAX_LINK_DISTANCE_KM,
-    MAX_TRACK_GAP_FRAMES,
-    MAX_TRACK_STEP_KM,
-    MAX_VECTOR_VELOCITY_DIFF_KMH,
-    MAX_VELOCITY_DIFF_KMH,
-    MIN_DIRECTION_STEP_KM,
-    MIN_CLUSTER_SIZE,
-    MIN_CONFIRMED_VELOCITY_KMH,
-    MIN_TRACK_LENGTH,
-    MIN_TRACK_STRAIGHTNESS,
     RESULT_DIR,
-    SECONDS_PER_HOUR,
-    SIGNAL_SCORE_MIN,
-    SNR_QUANTILE,
-    SNR_SCALE_DB,
-    SPACE_SCALE_KM,
     TABLE_DIR,
-    TRACK_FRAME_INTERVAL_SECONDS,
-    VELOCITY_SCALE_KMH,
+    MIN_TRACK_LENGTH,
+    MIN_DIRECTION_STEP_KM,
     ensure_output_dirs,
     load_point_table,
 )
 
 
-# 候选簇文件名来源：保存每帧检测出的目标候选
-CLUSTER_FILE_NAME = "candidate_clusters.csv"
+# ==========================================================================
+# V2风格参数：参考Radar_Tracking_GUI_V2.m调优
+# ==========================================================================
+# 卡尔曼模型每帧时间步长（与V2一致，按帧计）
+TRACK_DT = 1.0
+# 速度换算系数（数据vx/vy为km/h，转换为km/帧，1帧=60秒）
+TRACK_VEL_SCALE = 60.0  # 除以60得到km/帧
+# 过程噪声标准差（赋予目标机动转弯能力）
+TRACK_SIG_A = 2.0
+# 测量噪声标准差（与V2一致，单位km，25m→0.025km）
+TRACK_SIG_Z = 0.025
+# 马氏距离波门阈值（卡方2自由度，α≈0.01）
+TRACK_GATE_THRESHOLD = 9.21
+# 最大允许连续漏检次数（超过则判定目标消失）
+TRACK_MAX_MISSED = 4
+# 建档位移门限（km，3km以上才算真移动）
+TRACK_MIN_DISP_KM = 3.0
+# 航迹直线性阈值（过滤往返跳动的海杂波噪声链）
+TRACK_MIN_STRAIGHTNESS = 0.5
+
+# 常速模型状态转移矩阵
+TRACK_A = np.array(
+    [
+        [1.0, TRACK_DT, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, TRACK_DT],
+        [0.0, 0.0, 0.0, 1.0],
+    ],
+    dtype=float,
+)
+# 观测矩阵（只观测位置）
+TRACK_H = np.array(
+    [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+    ],
+    dtype=float,
+)
+# 过程噪声协方差
+TRACK_Q = np.array(
+    [
+        [TRACK_DT**4 / 4, TRACK_DT**3 / 2, 0.0, 0.0],
+        [TRACK_DT**3 / 2, TRACK_DT**2, 0.0, 0.0],
+        [0.0, 0.0, TRACK_DT**4 / 4, TRACK_DT**3 / 2],
+        [0.0, 0.0, TRACK_DT**3 / 2, TRACK_DT**2],
+    ],
+    dtype=float,
+) * (TRACK_SIG_A**2)
+# 测量噪声协方差
+TRACK_R = np.diag([TRACK_SIG_Z**2, TRACK_SIG_Z**2])
+# 状态维度
+STATE_DIM = 4
+
 # 候选航迹文件名来源：保存所有关联链路
 TRACK_FILE_NAME = "candidate_tracks.csv"
 # 确认航迹文件名来源：保存稳定疑似目标航迹
@@ -53,19 +75,20 @@ TRACK_SUMMARY_FILE_NAME = "track_summary.csv"
 # 确认航迹字段来源：空结果也保留稳定表头
 TRACK_RESULT_COLUMNS = [
     "frame_idx",
-    "cluster_id",
-    "point_count",
-    "center_x",
-    "center_y",
-    "center_lon",
-    "center_lat",
-    "mean_velocity",
-    "mean_vx",
-    "mean_vy",
-    "mean_snr",
-    "mean_amp",
-    "score",
     "track_id",
+    "raw_x",
+    "raw_y",
+    "raw_vx",
+    "raw_vy",
+    "smooth_x",
+    "smooth_y",
+    "snr",
+    "amp",
+    "velocity",
+    "range",
+    "lon",
+    "lat",
+    "class_id",
 ]
 # 航迹摘要字段来源：报告分析表格固定读取
 TRACK_SUMMARY_COLUMNS = [
@@ -75,435 +98,238 @@ TRACK_SUMMARY_COLUMNS = [
     "end_frame",
     "mean_snr",
     "mean_velocity",
-    "mean_vx",
-    "mean_vy",
-    "mean_point_count",
-    "start_x",
-    "start_y",
-    "end_x",
-    "end_y",
     "displacement",
     "path_length",
     "straightness",
     "mean_step",
     "max_step",
-    "max_step_velocity",
     "max_turn_angle",
 ]
-# 加权中心基准来源：保证权重为正
-CLUSTER_WEIGHT_EPS = 1e-6
-# 状态向量维度来源：常速模型[x,vx,y,vy]
-STATE_DIMENSION = 4
-# 观测向量维度来源：候选簇中心[x,y]
-MEASUREMENT_DIMENSION = 2
-# 观测矩阵来源：只观测位置
-OBSERVATION_MATRIX = np.array(
-    [
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
-    ],
-    dtype=float,
-)
-# 单位矩阵来源：Kalman协方差更新
-STATE_IDENTITY = np.eye(STATE_DIMENSION)
 
 
-def calculate_signal_weights(cluster_table: pd.DataFrame) -> np.ndarray:
-    # 计算候选簇内点迹信号权重
-    snr_values = cluster_table["snr"].to_numpy(dtype=float)
-    amp_values = cluster_table["amp"].to_numpy(dtype=float)
-    snr_weights = snr_values - np.nanmin(snr_values) + CLUSTER_WEIGHT_EPS
-    amp_weights = amp_values - np.nanmin(amp_values) + CLUSTER_WEIGHT_EPS
-    signal_weights = snr_weights + amp_weights
-    if not np.isfinite(signal_weights).all() or float(signal_weights.sum()) <= 0:
-        return np.ones(len(cluster_table), dtype=float)
-    return signal_weights
+def _predict_all(active_tracks: list[dict]) -> list[tuple[np.ndarray, np.ndarray]]:
+    """对所有活跃航迹执行一步预测"""
+    predictions = []
+    for trk in active_tracks:
+        predicted_state = TRACK_A @ trk["state"]
+        predicted_cov = TRACK_A @ trk["cov"] @ TRACK_A.T + TRACK_Q
+        predictions.append((predicted_state, predicted_cov))
+    return predictions
 
 
-def weighted_mean(cluster_table: pd.DataFrame, column_name: str, weights: np.ndarray) -> float:
-    # 计算指定字段加权均值
-    column_values = cluster_table[column_name].to_numpy(dtype=float)
-    return float(np.average(column_values, weights=weights))
-
-
-def build_transition_matrix(frame_step: int) -> np.ndarray:
-    # 构造常速模型状态转移矩阵
-    elapsed_hours = frame_step * TRACK_FRAME_INTERVAL_SECONDS / SECONDS_PER_HOUR
-    return np.array(
-        [
-            [1.0, elapsed_hours, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, elapsed_hours],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        dtype=float,
-    )
-
-
-def build_process_noise(frame_step: int) -> np.ndarray:
-    # 构造常速模型过程噪声矩阵
-    elapsed_hours = frame_step * TRACK_FRAME_INTERVAL_SECONDS / SECONDS_PER_HOUR
-    time_square = elapsed_hours**2
-    time_cube = elapsed_hours**3
-    time_fourth = elapsed_hours**4
-    base_noise = np.array(
-        [
-            [time_fourth / 4.0, time_cube / 2.0, 0.0, 0.0],
-            [time_cube / 2.0, time_square, 0.0, 0.0],
-            [0.0, 0.0, time_fourth / 4.0, time_cube / 2.0],
-            [0.0, 0.0, time_cube / 2.0, time_square],
-        ],
-        dtype=float,
-    )
-    return base_noise * (KALMAN_ACCEL_STD_KMH2**2)
-
-
-def build_measurement_noise() -> np.ndarray:
-    # 构造位置测量噪声矩阵
-    return np.diag([KALMAN_POSITION_NOISE_KM**2, KALMAN_POSITION_NOISE_KM**2])
-
-
-def initialize_track_state(candidate_row: pd.Series) -> tuple[np.ndarray, np.ndarray]:
-    # 初始化航迹状态和协方差
-    state_vector = np.array(
-        [
-            float(candidate_row["center_x"]),
-            float(candidate_row["mean_vx"]),
-            float(candidate_row["center_y"]),
-            float(candidate_row["mean_vy"]),
-        ],
-        dtype=float,
-    )
-    covariance_matrix = np.diag(
-        [
-            KALMAN_POSITION_NOISE_KM**2,
-            KALMAN_INITIAL_VELOCITY_STD_KMH**2,
-            KALMAN_POSITION_NOISE_KM**2,
-            KALMAN_INITIAL_VELOCITY_STD_KMH**2,
-        ]
-    )
-    return state_vector, covariance_matrix
-
-
-def predict_track_state(track_state: dict, frame_step: int) -> tuple[np.ndarray, np.ndarray]:
-    # 预测航迹状态和协方差
-    transition_matrix = build_transition_matrix(frame_step)
-    process_noise = build_process_noise(frame_step)
-    predicted_state = transition_matrix @ track_state["state_vector"]
-    predicted_covariance = transition_matrix @ track_state["covariance_matrix"] @ transition_matrix.T + process_noise
-    return predicted_state, predicted_covariance
-
-
-def update_track_state(
-    predicted_state: np.ndarray,
-    predicted_covariance: np.ndarray,
-    candidate_row: pd.Series,
-) -> tuple[np.ndarray, np.ndarray]:
-    # 使用候选中心更新Kalman状态
-    measurement_vector = np.array([candidate_row["center_x"], candidate_row["center_y"]], dtype=float)
-    measurement_noise = build_measurement_noise()
-    innovation = measurement_vector - OBSERVATION_MATRIX @ predicted_state
-    innovation_covariance = OBSERVATION_MATRIX @ predicted_covariance @ OBSERVATION_MATRIX.T + measurement_noise
-    kalman_gain = predicted_covariance @ OBSERVATION_MATRIX.T @ np.linalg.inv(innovation_covariance)
-    updated_state = predicted_state + kalman_gain @ innovation
-    updated_covariance = (STATE_IDENTITY - kalman_gain @ OBSERVATION_MATRIX) @ predicted_covariance
-    return updated_state, updated_covariance
-
-
-def mahalanobis_distance(
-    candidate_row: pd.Series,
-    predicted_state: np.ndarray,
-    predicted_covariance: np.ndarray,
-) -> float:
-    # 计算候选中心到预测位置的马氏距离
-    measurement_vector = np.array([candidate_row["center_x"], candidate_row["center_y"]], dtype=float)
-    measurement_noise = build_measurement_noise()
-    innovation = measurement_vector - OBSERVATION_MATRIX @ predicted_state
-    innovation_covariance = OBSERVATION_MATRIX @ predicted_covariance @ OBSERVATION_MATRIX.T + measurement_noise
-    return float(innovation.T @ np.linalg.inv(innovation_covariance) @ innovation)
-
-
-def select_strong_points(frame_table: pd.DataFrame) -> pd.DataFrame:
-    # 按帧和距离分区执行信号强点筛选
-    valid_table = frame_table.replace([np.inf, -np.inf], np.nan).dropna(
-        subset=["snr", "amp", "x", "y", "velocity", "range"]
-    )
-    if valid_table.empty:
-        return valid_table
-
-    valid_table = valid_table.copy()
-    frame_snr_threshold = valid_table["snr"].quantile(SNR_QUANTILE)
-    frame_amp_threshold = valid_table["amp"].quantile(AMP_QUANTILE)
-    valid_table["local_snr_threshold"] = frame_snr_threshold
-    valid_table["local_amp_threshold"] = frame_amp_threshold
-
-    range_bin_count = min(LOCAL_RANGE_BIN_COUNT, max(1, len(valid_table) // LOCAL_RANGE_MIN_POINTS))
-    if range_bin_count > 1:
-        range_bins = pd.qcut(valid_table["range"], q=range_bin_count, duplicates="drop")
-        for _, range_group in valid_table.groupby(range_bins, observed=False):
-            # 更新距离分区阈值
-            if len(range_group) < LOCAL_RANGE_MIN_POINTS:
-                continue
-            local_snr_threshold = range_group["snr"].quantile(SNR_QUANTILE)
-            local_amp_threshold = range_group["amp"].quantile(AMP_QUANTILE)
-            valid_table.loc[range_group.index, "local_snr_threshold"] = min(
-                frame_snr_threshold,
-                local_snr_threshold,
-            )
-            valid_table.loc[range_group.index, "local_amp_threshold"] = min(
-                frame_amp_threshold,
-                local_amp_threshold,
-            )
-
-    valid_table["snr_rank"] = valid_table["snr"].rank(pct=True)
-    valid_table["amp_rank"] = valid_table["amp"].rank(pct=True)
-    valid_table["signal_score"] = valid_table["snr_rank"] + valid_table["amp_rank"]
-
-    local_signal_mask = (
-        (valid_table["snr"] >= valid_table["local_snr_threshold"])
-        & (valid_table["amp"] >= valid_table["local_amp_threshold"])
-    )
-    combined_signal_mask = valid_table["signal_score"] >= SIGNAL_SCORE_MIN
-    strong_table = valid_table[local_signal_mask | combined_signal_mask].copy()
-    return strong_table
-
-
-def build_cluster_features(point_table: pd.DataFrame) -> np.ndarray:
-    # 将点迹特征转换到可比较的物理尺度
-    return np.column_stack(
-        [
-            point_table["x"].to_numpy() / SPACE_SCALE_KM,
-            point_table["y"].to_numpy() / SPACE_SCALE_KM,
-            point_table["velocity"].to_numpy() / VELOCITY_SCALE_KMH,
-            point_table["snr"].to_numpy() / SNR_SCALE_DB,
-            point_table["amp"].to_numpy() / AMP_SCALE,
-        ]
-    )
-
-
-def detect_frame_clusters(frame_table: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
-    # 对单帧强点进行聚类并汇总候选簇
-    strong_points = select_strong_points(frame_table)
-    if len(strong_points) < DBSCAN_MIN_SAMPLES:
-        return strong_points.assign(cluster_id=-1), []
-
-    cluster_features = build_cluster_features(strong_points)
-    cluster_labels = DBSCAN(eps=DBSCAN_EPS, min_samples=DBSCAN_MIN_SAMPLES).fit_predict(cluster_features)
-    strong_points["cluster_id"] = cluster_labels
-    cluster_rows = []
-
-    for cluster_id in sorted(label for label in np.unique(cluster_labels) if label >= 0):
-        cluster_table = strong_points[strong_points["cluster_id"] == cluster_id]
-        if len(cluster_table) < MIN_CLUSTER_SIZE:
+def _build_cost_matrix(
+    active_tracks: list[dict],
+    predictions: list[tuple[np.ndarray, np.ndarray]],
+    xy_data: np.ndarray,
+) -> np.ndarray:
+    """构建全局代价矩阵（马氏距离），不满足波门的置inf"""
+    n_tracks = len(active_tracks)
+    n_obs = len(xy_data)
+    cost = np.full((n_tracks, n_obs), np.inf)
+    for j in range(n_tracks):
+        pred_state, pred_cov = predictions[j]
+        z_pred = TRACK_H @ pred_state
+        S_innov = TRACK_H @ pred_cov @ TRACK_H.T + TRACK_R
+        try:
+            S_inv = np.linalg.inv(S_innov)
+        except np.linalg.LinAlgError:
             continue
-        signal_weights = calculate_signal_weights(cluster_table)
-        cluster_rows.append(
-            {
-                "frame_idx": int(cluster_table["frame_idx"].iloc[0]),
-                "cluster_id": int(cluster_id),
-                "point_count": int(len(cluster_table)),
-                "center_x": weighted_mean(cluster_table, "x", signal_weights),
-                "center_y": weighted_mean(cluster_table, "y", signal_weights),
-                "center_lon": weighted_mean(cluster_table, "lon", signal_weights),
-                "center_lat": weighted_mean(cluster_table, "lat", signal_weights),
-                "mean_velocity": weighted_mean(cluster_table, "velocity", signal_weights),
-                "mean_vx": weighted_mean(cluster_table, "vx", signal_weights),
-                "mean_vy": weighted_mean(cluster_table, "vy", signal_weights),
-                "mean_snr": float(cluster_table["snr"].mean()),
-                "mean_amp": float(cluster_table["amp"].mean()),
-                "score": float(cluster_table["snr"].mean() + np.log1p(len(cluster_table))),
-            }
-        )
-    return strong_points, cluster_rows
+        for i in range(n_obs):
+            innovation = xy_data[i, [0, 2]] - z_pred
+            d = float(innovation.T @ S_inv @ innovation)
+            if d < TRACK_GATE_THRESHOLD:
+                cost[j, i] = d
+    return cost
 
 
-def detect_all_clusters(point_table: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    # 对全部帧执行候选检测
-    strong_point_tables = []
-    cluster_rows = []
-    for _, frame_table in point_table.groupby("frame_idx"):
-        strong_points, frame_cluster_rows = detect_frame_clusters(frame_table)
-        strong_point_tables.append(strong_points)
-        cluster_rows.extend(frame_cluster_rows)
-    strong_point_table = pd.concat(strong_point_tables, ignore_index=True)
-    cluster_table = pd.DataFrame(cluster_rows)
-    return strong_point_table, cluster_table
+def _greedy_global_assign(cost: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """全局贪婪最小代价关联，返回(assign, used)"""
+    n_tracks, n_obs = cost.shape
+    assign = np.full(n_tracks, -1, dtype=int)
+    used = np.zeros(n_obs, dtype=bool)
+    while True:
+        idx = np.argmin(cost)
+        if np.isinf(cost.flat[idx]):
+            break
+        j, i = np.unravel_index(idx, cost.shape)
+        assign[j] = i
+        used[i] = True
+        cost[j, :] = np.inf
+        cost[:, i] = np.inf
+    return assign, used
 
 
-def candidate_distance(candidate_row: pd.Series, predicted_state: np.ndarray) -> float:
-    # 计算候选簇与Kalman预测位置距离
-    delta_x = float(candidate_row["center_x"] - predicted_state[0])
-    delta_y = float(candidate_row["center_y"] - predicted_state[2])
-    return float(np.hypot(delta_x, delta_y))
+def _update_matched(
+    trk: dict,
+    pred_state: np.ndarray,
+    pred_cov: np.ndarray,
+    z: np.ndarray,
+    frame_idx: int,
+    raw_row: pd.Series,
+    xy_row: np.ndarray,
+) -> None:
+    """Kalman更新：匹配成功"""
+    S_innov = TRACK_H @ pred_cov @ TRACK_H.T + TRACK_R
+    K = pred_cov @ TRACK_H.T @ np.linalg.inv(S_innov)
+    xu = pred_state + K @ (z - TRACK_H @ pred_state)
+    pu = (np.eye(STATE_DIM) - K @ TRACK_H) @ pred_cov
+    trk["state"] = xu
+    trk["cov"] = pu
+    trk["missed"] = 0
+    trk["smooth_path"].append([xu[0], xu[2]])
+    trk["meas_path"].append([z[0], z[1]])
+    trk["frames"].append(frame_idx)
+    trk["raw_rows"].append(raw_row.to_dict())
 
 
-def calculate_direction_change(candidate_row: pd.Series, track_state: dict) -> float:
-    # 计算候选延续方向与上一段方向的夹角
-    if track_state.get("previous_x") is None:
-        return 0.0
-
-    previous_step = np.array(
-        [
-            track_state["last_x"] - track_state["previous_x"],
-            track_state["last_y"] - track_state["previous_y"],
-        ],
-        dtype=float,
-    )
-    current_step = np.array(
-        [
-            candidate_row["center_x"] - track_state["last_x"],
-            candidate_row["center_y"] - track_state["last_y"],
-        ],
-        dtype=float,
-    )
-    previous_distance = float(np.linalg.norm(previous_step))
-    current_distance = float(np.linalg.norm(current_step))
-    if previous_distance < MIN_DIRECTION_STEP_KM or current_distance < MIN_DIRECTION_STEP_KM:
-        return 0.0
-
-    cosine_value = float(np.dot(previous_step, current_step) / (previous_distance * current_distance))
-    clipped_cosine = float(np.clip(cosine_value, -1.0, 1.0))
-    return float(np.degrees(np.arccos(clipped_cosine)))
+def _update_missed(
+    trk: dict,
+    pred_state: np.ndarray,
+    pred_cov: np.ndarray,
+) -> None:
+    """Kalman更新：漏检，使用预测值维持"""
+    trk["state"] = pred_state
+    trk["cov"] = pred_cov
+    trk["missed"] += 1
+    trk["smooth_path"].append([pred_state[0], pred_state[2]])
+    trk["meas_path"].append([np.nan, np.nan])
 
 
-def is_direction_consistent(candidate_row: pd.Series, track_state: dict) -> bool:
-    # 判断候选延续方向是否平滑
-    turn_angle = calculate_direction_change(candidate_row, track_state)
-    return turn_angle <= MAX_DIRECTION_CHANGE_DEG
+def _clip_tail_and_validate(trk: dict) -> bool:
+    """智能断尾裁剪后判断航迹是否有效
+    注意：frames/raw_rows只存真实匹配帧，不含外推帧，
+    裁剪smooth_path/meas_path时不对frames/raw_rows操作。"""
+    m = trk["missed"]
+    if m > 0 and len(trk["meas_path"]) > m:
+        trk["smooth_path"] = trk["smooth_path"][:-m]
+        trk["meas_path"] = trk["meas_path"][:-m]
+    valid_count = sum(~np.isnan(p[0]) for p in trk["meas_path"])
+    if valid_count < MIN_TRACK_LENGTH:
+        return False
+    if len(trk["smooth_path"]) < 2:
+        return False
+    start = np.array(trk["smooth_path"][0])
+    end = np.array(trk["smooth_path"][-1])
+    disp = float(np.linalg.norm(end - start))
+    if disp <= TRACK_MIN_DISP_KM:
+        return False
+    # 计算直线性：首尾位移 / 累计路径长度
+    coords = np.array(trk["smooth_path"])
+    path_len = float(np.sum(np.linalg.norm(np.diff(coords, axis=0), axis=1)))
+    straightness = disp / path_len if path_len > 0 else 0.0
+    return straightness >= TRACK_MIN_STRAIGHTNESS
 
 
-def find_track_match(
-    frame_candidates: pd.DataFrame,
-    track_state: dict,
-    used_indices: set,
-    frame_step: int,
-) -> tuple[int | None, np.ndarray, np.ndarray]:
-    # 选择当前航迹的马氏距离最近邻候选
-    best_index = None
-    best_distance = KALMAN_GATE_THRESHOLD
-    predicted_state, predicted_covariance = predict_track_state(track_state, frame_step)
-    # 长断帧时附加死推算校验，防止Kalman协方差膨胀后的错关联
-    if frame_step > 1:
-        dt_hours = frame_step * TRACK_FRAME_INTERVAL_SECONDS / SECONDS_PER_HOUR
-        dead_x = track_state["last_x"] + track_state["last_vx"] * dt_hours
-        dead_y = track_state["last_y"] + track_state["last_vy"] * dt_hours
-    for candidate_index, candidate_row in frame_candidates.iterrows():
-        if candidate_index in used_indices:
-            continue
-        distance = mahalanobis_distance(candidate_row, predicted_state, predicted_covariance)
-        spatial_distance = candidate_distance(candidate_row, predicted_state)
-        velocity_diff = abs(float(candidate_row["mean_velocity"] - track_state["last_velocity"]))
-        vector_velocity_diff = np.hypot(
-            float(candidate_row["mean_vx"] - track_state["last_vx"]),
-            float(candidate_row["mean_vy"] - track_state["last_vy"]),
-        )
-        # 长断帧时死推算距离必须收敛，防止Kalman波门过宽匹配到错簇
-        dead_distance = 0.0
-        if frame_step > 1:
-            dead_distance = np.hypot(
-                float(candidate_row["center_x"]) - dead_x,
-                float(candidate_row["center_y"]) - dead_y,
-            )
-        max_dead = MAX_LINK_DISTANCE_KM * (0.45 + 0.07 * frame_step) if frame_step > 1 else 0.0
-        if (
-            distance <= best_distance
-            and spatial_distance <= MAX_LINK_DISTANCE_KM
-            and dead_distance <= max_dead
-            and velocity_diff <= MAX_VELOCITY_DIFF_KMH
-            and vector_velocity_diff <= MAX_VECTOR_VELOCITY_DIFF_KMH
-            and is_direction_consistent(candidate_row, track_state)
-        ):
-            best_index = candidate_index
-            best_distance = distance
-    return best_index, predicted_state, predicted_covariance
+def _init_new_track(raw_row: pd.Series, xy_row: np.ndarray, frame_idx: int, track_id: int) -> dict:
+    """从未关联点迹初始化新航迹（速度从km/h换算为km/帧）"""
+    x, vx_raw, y, vy_raw = xy_row
+    vx = vx_raw / TRACK_VEL_SCALE
+    vy = vy_raw / TRACK_VEL_SCALE
+    return {
+        "track_id": track_id,
+        "state": np.array([x, vx, y, vy], dtype=float),
+        "cov": np.diag([TRACK_SIG_Z**2, 100.0, TRACK_SIG_Z**2, 100.0]),
+        "smooth_path": [[x, y]],
+        "meas_path": [[x, y]],
+        "frames": [frame_idx],
+        "raw_rows": [raw_row.to_dict()],
+        "missed": 0,
+    }
 
 
-def link_tracks(cluster_table: pd.DataFrame) -> pd.DataFrame:
-    # 使用预测位置和最近邻逻辑关联候选簇
-    if cluster_table.empty:
-        return pd.DataFrame()
+def link_tracks(point_table: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
+    """V2风格全局代价矩阵航迹关联：直接处理原始点迹，含归档系统"""
+    active_tracks: list[dict] = []
+    archived_tracks: list[dict] = []
+    next_id = 1
 
-    active_tracks = []
-    track_rows = []
-    next_track_id = 1
+    for frame_idx in sorted(point_table["frame_idx"].unique()):
+        frame_data = point_table[point_table["frame_idx"] == frame_idx].reset_index(drop=True)
+        xy_data = frame_data[["x", "vx", "y", "vy"]].to_numpy(dtype=float)
+        n_obs = len(xy_data)
+        n_tracks = len(active_tracks)
 
-    for frame_idx in sorted(cluster_table["frame_idx"].unique()):
-        frame_candidates = cluster_table[cluster_table["frame_idx"] == frame_idx].sort_values("score", ascending=False)
-        used_indices = set()
+        # 步骤A：预测所有活跃航迹
+        predictions = _predict_all(active_tracks) if n_tracks > 0 else []
 
-        for track_state in active_tracks:
-            frame_step = int(frame_idx - track_state["last_frame"])
-            if frame_step < 1 or frame_step > MAX_TRACK_GAP_FRAMES + 1:
-                continue
-            best_index, predicted_state, predicted_covariance = find_track_match(
-                frame_candidates,
-                track_state,
-                used_indices,
-                frame_step,
-            )
-            if best_index is None:
-                continue
-            matched_row = frame_candidates.loc[best_index].copy()
-            updated_state, updated_covariance = update_track_state(
-                predicted_state,
-                predicted_covariance,
-                matched_row,
-            )
-            matched_row["track_id"] = track_state["track_id"]
-            track_rows.append(matched_row)
-            used_indices.add(best_index)
-            track_state["previous_x"] = track_state["last_x"]
-            track_state["previous_y"] = track_state["last_y"]
-            track_state["last_frame"] = int(matched_row["frame_idx"])
-            track_state["state_vector"] = updated_state
-            track_state["covariance_matrix"] = updated_covariance
-            track_state["last_x"] = float(matched_row["center_x"])
-            track_state["last_y"] = float(matched_row["center_y"])
-            track_state["last_velocity"] = float(matched_row["mean_velocity"])
-            track_state["last_vx"] = float(matched_row["mean_vx"])
-            track_state["last_vy"] = float(matched_row["mean_vy"])
+        # 步骤B：全局代价矩阵 + 贪婪关联
+        if n_tracks > 0 and n_obs > 0:
+            cost = _build_cost_matrix(active_tracks, predictions, xy_data)
+            assign, used = _greedy_global_assign(cost)
+        else:
+            assign = np.full(n_tracks, -1, dtype=int)
+            used = np.zeros(n_obs, dtype=bool)
 
-        for candidate_index, candidate_row in frame_candidates.iterrows():
-            if candidate_index in used_indices:
-                continue
-            new_row = candidate_row.copy()
-            new_row["track_id"] = next_track_id
-            track_rows.append(new_row)
-            state_vector, covariance_matrix = initialize_track_state(candidate_row)
-            active_tracks.append(
+        # 步骤C：量测更新
+        for j in range(n_tracks):
+            pred_state, pred_cov = predictions[j]
+            if assign[j] >= 0:
+                i = int(assign[j])
+                z = xy_data[i, [0, 2]]
+                _update_matched(active_tracks[j], pred_state, pred_cov, z, frame_idx, frame_data.iloc[i], xy_data[i])
+            else:
+                _update_missed(active_tracks[j], pred_state, pred_cov)
+
+        # 步骤D：航迹生命周期管理（断尾裁剪 + 建档门限审查）
+        keep_indices = []
+        for j in range(n_tracks):
+            if active_tracks[j]["missed"] < TRACK_MAX_MISSED:
+                keep_indices.append(j)
+            else:
+                if _clip_tail_and_validate(active_tracks[j]):
+                    archived_tracks.append(active_tracks[j])
+        active_tracks = [active_tracks[i] for i in keep_indices]
+
+        # 步骤E：未关联点迹初始化新航迹
+        for i in range(n_obs):
+            if not used[i]:
+                active_tracks.append(_init_new_track(frame_data.iloc[i], xy_data[i], frame_idx, next_id))
+                next_id += 1
+
+    # 循环结束后最终清理：存活到最后的航迹也做断尾审查
+    for trk in active_tracks:
+        if _clip_tail_and_validate(trk):
+            archived_tracks.append(trk)
+
+    # 转换为输出DataFrame（使用smooth_x/smooth_y构建规范列）
+    track_table = _build_track_dataframe(archived_tracks)
+    return track_table, archived_tracks
+
+
+def _build_track_dataframe(archived_tracks: list[dict]) -> pd.DataFrame:
+    """将归档航迹转换为跟踪结果DataFrame"""
+    all_rows = []
+    for trk in archived_tracks:
+        smooth_arr = np.array(trk["smooth_path"])
+        meas_arr = np.array(trk["meas_path"])
+        for k, raw_row in enumerate(trk["raw_rows"]):
+            all_rows.append(
                 {
-                    "track_id": next_track_id,
-                    "last_frame": int(candidate_row["frame_idx"]),
-                    "state_vector": state_vector,
-                    "covariance_matrix": covariance_matrix,
-                    "previous_x": None,
-                    "previous_y": None,
-                    "last_x": float(candidate_row["center_x"]),
-                    "last_y": float(candidate_row["center_y"]),
-                    "last_velocity": float(candidate_row["mean_velocity"]),
-                    "last_vx": float(candidate_row["mean_vx"]),
-                    "last_vy": float(candidate_row["mean_vy"]),
+                    "track_id": trk["track_id"],
+                    "frame_idx": trk["frames"][k],
+                    "smooth_x": smooth_arr[k, 0],
+                    "smooth_y": smooth_arr[k, 1],
+                    "meas_x": meas_arr[k, 0] if not np.isnan(meas_arr[k, 0]) else np.nan,
+                    "meas_y": meas_arr[k, 1] if not np.isnan(meas_arr[k, 1]) else np.nan,
+                    "snr": raw_row.get("snr", np.nan),
+                    "amp": raw_row.get("amp", np.nan),
+                    "velocity": raw_row.get("velocity", np.nan),
+                    "vx": raw_row.get("vx", np.nan),
+                    "vy": raw_row.get("vy", np.nan),
+                    "range": raw_row.get("range", np.nan),
+                    "lon": raw_row.get("lon", np.nan),
+                    "lat": raw_row.get("lat", np.nan),
                 }
             )
-            next_track_id += 1
-
-        # 移除无法继续关联的历史航迹
-        active_tracks = [
-            track_state
-            for track_state in active_tracks
-            if frame_idx - track_state["last_frame"] <= MAX_TRACK_GAP_FRAMES + 1
-        ]
-
-    if not track_rows:
-        return pd.DataFrame(columns=TRACK_RESULT_COLUMNS)
-    return pd.DataFrame(track_rows)[TRACK_RESULT_COLUMNS]
+    if not all_rows:
+        return pd.DataFrame(columns=["track_id", "frame_idx", "smooth_x", "smooth_y", "meas_x", "meas_y"])
+    return pd.DataFrame(all_rows)
 
 
 def calculate_track_turn_angles(coordinate_values: np.ndarray) -> list[float]:
-    # 计算整条航迹的有效转向角
+    """计算整条航迹的有效转向角"""
     if len(coordinate_values) < 3:
         return []
-
     step_vectors = np.diff(coordinate_values, axis=0)
     turn_angles = []
     for previous_step, current_step in zip(step_vectors[:-1], step_vectors[1:]):
@@ -517,123 +343,121 @@ def calculate_track_turn_angles(coordinate_values: np.ndarray) -> list[float]:
     return turn_angles
 
 
-def summarize_tracks(confirmed_tracks: pd.DataFrame) -> pd.DataFrame:
-    # 汇总确认航迹的关键指标
-    if confirmed_tracks.empty:
+def summarize_tracks(track_table: pd.DataFrame) -> pd.DataFrame:
+    """汇总航迹关键指标（基于平滑位置和原始量测）"""
+    if track_table.empty:
         return pd.DataFrame(columns=TRACK_SUMMARY_COLUMNS)
-    ordered_tracks = confirmed_tracks.sort_values(["track_id", "frame_idx"])
-    track_summary = (
-        ordered_tracks.groupby("track_id")
-        .agg(
-            frame_count=("frame_idx", "count"),
-            start_frame=("frame_idx", "min"),
-            end_frame=("frame_idx", "max"),
-            mean_snr=("mean_snr", "mean"),
-            mean_velocity=("mean_velocity", "mean"),
-            mean_vx=("mean_vx", "mean"),
-            mean_vy=("mean_vy", "mean"),
-            mean_point_count=("point_count", "mean"),
-            start_x=("center_x", "first"),
-            start_y=("center_y", "first"),
-            end_x=("center_x", "last"),
-            end_y=("center_y", "last"),
-        )
-        .reset_index()
-    )
-    track_summary["displacement"] = np.hypot(
-        track_summary["end_x"] - track_summary["start_x"],
-        track_summary["end_y"] - track_summary["start_y"],
-    )
+
+    ordered = track_table.sort_values(["track_id", "frame_idx"])
+    grouped = ordered.groupby("track_id")
+
+    summary = grouped.agg(
+        frame_count=("frame_idx", "count"),
+        start_frame=("frame_idx", "min"),
+        end_frame=("frame_idx", "max"),
+        mean_snr=("snr", "mean"),
+        mean_velocity=("velocity", "mean"),
+    ).reset_index()
+
     quality_rows = []
-    for track_id, track_group in ordered_tracks.groupby("track_id"):
-        # 计算航迹形态质量指标
-        coordinate_values = track_group[["center_x", "center_y"]].to_numpy(dtype=float)
-        frame_values = track_group["frame_idx"].to_numpy(dtype=int)
-        step_distances = np.linalg.norm(np.diff(coordinate_values, axis=0), axis=1)
-        frame_diffs = np.diff(frame_values)
-        step_velocities = step_distances * 60.0 / np.maximum(frame_diffs, 1)
-        path_length = float(step_distances.sum())
-        displacement = float(np.linalg.norm(coordinate_values[-1] - coordinate_values[0]))
+    for track_id, grp in ordered.groupby("track_id"):
+        coords = grp[["smooth_x", "smooth_y"]].to_numpy(dtype=float)
+        step_distances = np.linalg.norm(np.diff(coords, axis=0), axis=1)
+        path_length = float(step_distances.sum()) if len(step_distances) > 0 else 0.0
+        displacement = float(np.linalg.norm(coords[-1] - coords[0])) if len(coords) >= 2 else 0.0
         straightness = displacement / path_length if path_length > 0 else 0.0
-        turn_angles = calculate_track_turn_angles(coordinate_values)
+        turn_angles = calculate_track_turn_angles(coords)
         quality_rows.append(
             {
                 "track_id": track_id,
+                "displacement": displacement,
                 "path_length": path_length,
                 "straightness": straightness,
                 "mean_step": float(step_distances.mean()) if len(step_distances) else 0.0,
                 "max_step": float(step_distances.max()) if len(step_distances) else 0.0,
-                "max_step_velocity": float(step_velocities.max()) if len(step_velocities) else 0.0,
                 "max_turn_angle": float(max(turn_angles)) if turn_angles else 0.0,
             }
         )
+
     quality_table = pd.DataFrame(quality_rows)
-    track_summary = track_summary.merge(quality_table, on="track_id", how="left")
-    sorted_summary = track_summary.sort_values(["straightness", "frame_count", "mean_snr"], ascending=False)
-    return sorted_summary[TRACK_SUMMARY_COLUMNS]
+    summary = summary.merge(quality_table, on="track_id", how="left")
+    summary = summary.sort_values(["straightness", "frame_count", "mean_snr"], ascending=False)
+    return summary[TRACK_SUMMARY_COLUMNS]
 
 
-def filter_track_summary(track_summary: pd.DataFrame) -> pd.DataFrame:
-    # 筛选形态质量达标的航迹摘要
+def select_confirmed_tracks(
+    track_table: pd.DataFrame, archived_tracks: list[dict]
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """从归档航迹中选取确认航迹（已通过长度+位移门限）"""
+    if track_table.empty:
+        empty_cols = ["track_id", "frame_idx", "smooth_x", "smooth_y"]
+        return pd.DataFrame(columns=empty_cols), pd.DataFrame(columns=TRACK_SUMMARY_COLUMNS)
+
+    track_summary = summarize_tracks(track_table)
+    return track_table, track_summary
+
+
+def rank_tracks(track_summary: pd.DataFrame, top_n: int = 15) -> pd.DataFrame:
+    """综合评分排名：straightness × frame_count × mean_snr，选Top N"""
     if track_summary.empty:
         return track_summary
-    quality_mask = (
-        (track_summary["straightness"] >= MIN_TRACK_STRAIGHTNESS)
-        & (track_summary["max_step"] <= MAX_TRACK_STEP_KM)
-        & (track_summary["mean_step"] <= MAX_MEAN_TRACK_STEP_KM)
-        & (track_summary["max_turn_angle"] <= MAX_DIRECTION_CHANGE_DEG)
-        & (
-            track_summary["max_step_velocity"].isna()
-            | (track_summary["max_step_velocity"] <= MAX_STEP_VELOCITY_KMH)
-        )
-        & (np.abs(track_summary["mean_velocity"]) >= MIN_CONFIRMED_VELOCITY_KMH)
+    scored = track_summary.copy()
+    scored["quality_score"] = (
+        scored["straightness"] * scored["frame_count"] * scored["mean_snr"].clip(lower=1.0)
     )
-    return track_summary[quality_mask].copy()
-
-
-def select_confirmed_tracks(track_table: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    # 按长度和形态质量确认疑似航迹
-    if track_table.empty:
-        empty_tracks = pd.DataFrame(columns=TRACK_RESULT_COLUMNS)
-        empty_summary = pd.DataFrame(columns=TRACK_SUMMARY_COLUMNS)
-        return empty_tracks, empty_summary, empty_summary
-
-    track_lengths = track_table.groupby("track_id").size()
-    length_track_ids = track_lengths[track_lengths >= MIN_TRACK_LENGTH].index
-    length_tracks = track_table[track_table["track_id"].isin(length_track_ids)].copy()
-    length_summary = summarize_tracks(length_tracks)
-    quality_summary = filter_track_summary(length_summary)
-    confirmed_track_ids = quality_summary["track_id"].astype(int).tolist()
-    confirmed_tracks = track_table[track_table["track_id"].isin(confirmed_track_ids)].copy()
-    track_summary = summarize_tracks(confirmed_tracks)
-    return confirmed_tracks, track_summary, length_summary
+    scored = scored.sort_values("quality_score", ascending=False)
+    return scored.head(top_n)
 
 
 def main():
-    # 设置控制台编码和输出目录
+    """V2风格目标检测与跟踪主流程"""
     sys.stdout.reconfigure(encoding="utf-8")
     ensure_output_dirs()
 
-    # 读取点迹并执行检测跟踪
-    point_table = load_point_table()
-    strong_point_table, cluster_table = detect_all_clusters(point_table)
-    track_table = link_tracks(cluster_table)
-    confirmed_tracks, track_summary, length_summary = select_confirmed_tracks(track_table)
+    print("=" * 60)
+    print("高频地波雷达目标跟踪 — V2全局代价矩阵版本")
+    print("=" * 60)
 
-    # 保存结果数据
-    strong_point_table.to_csv(TABLE_DIR / "strong_points.csv", index=False, encoding="utf-8-sig")
-    cluster_table.to_csv(RESULT_DIR / CLUSTER_FILE_NAME, index=False, encoding="utf-8-sig")
-    track_table.to_csv(RESULT_DIR / TRACK_FILE_NAME, index=False, encoding="utf-8-sig")
+    # 1. 读取原始点迹数据
+    point_table = load_point_table()
+    # 清洗无效点迹（去掉snr/amp/velocity等关键字段缺失的行）
+    clean_table = point_table.replace([np.inf, -np.inf], np.nan).dropna(
+        subset=["x", "y", "vx", "vy", "snr", "amp", "velocity"]
+    )
+    print(f"原始点迹: {len(point_table)} → 清洗后: {len(clean_table)}")
+    print(f"帧范围: {int(clean_table['frame_idx'].min())} - {int(clean_table['frame_idx'].max())}")
+
+    # 2. 全局代价矩阵航迹关联（跳过DBSCAN聚类，直接处理原始点迹）
+    track_table, archived_tracks = link_tracks(clean_table)
+    print(f"归档航迹数量: {len(archived_tracks)}")
+
+    # 3. 生成航迹摘要
+    confirmed_tracks, track_summary = select_confirmed_tracks(track_table, archived_tracks)
+
+    # 4. 保存结果
     confirmed_tracks.to_csv(RESULT_DIR / CONFIRMED_TRACK_FILE_NAME, index=False, encoding="utf-8-sig")
     track_summary.to_csv(RESULT_DIR / TRACK_SUMMARY_FILE_NAME, index=False, encoding="utf-8-sig")
+    clean_table.to_csv(TABLE_DIR / "strong_points.csv", index=False, encoding="utf-8-sig")
 
-    # 输出运行摘要
-    print(f"候选簇数量：{len(cluster_table)}")
-    print(f"候选航迹数量：{track_table['track_id'].nunique() if not track_table.empty else 0}")
-    print(f"长度达标航迹数量：{length_summary['track_id'].nunique() if not length_summary.empty else 0}")
-    print(f"质量确认航迹数量：{confirmed_tracks['track_id'].nunique() if not confirmed_tracks.empty else 0}")
+    # 5. 输出运行摘要
+    print("-" * 60)
+    print(f"确认航迹总数: {track_summary['track_id'].nunique() if not track_summary.empty else 0}")
+
+    # 6. 综合评分排名展示Top航迹
+    top_summary = rank_tracks(track_summary, top_n=12)
+    if not top_summary.empty:
+        print(f"\n{'='*60}")
+        print("综合评分 Top 12 优质航迹（straightness × 帧数 × SNR）")
+        print(f"{'='*60}")
+        display_cols = ["track_id", "frame_count", "displacement", "straightness", "mean_snr"]
+        top_display = top_summary[display_cols].copy()
+        top_display["track_id"] = top_display["track_id"].astype(int)
+        top_display["displacement"] = top_display["displacement"].round(1)
+        top_display["straightness"] = top_display["straightness"].round(3)
+        top_display["mean_snr"] = top_display["mean_snr"].round(1)
+        print(top_display.to_string(index=False))
+    print("=" * 60)
 
 
 if __name__ == "__main__":
-    # 执行检测与航迹确认流程
     main()

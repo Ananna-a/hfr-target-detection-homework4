@@ -101,8 +101,8 @@ MIN_DIRECTION_STEP_KM = 0.25
 MAX_DIRECTION_CHANGE_DEG = 125.0
 # 航迹最大断帧来源：允许候选短暂缺失后重连
 MAX_TRACK_GAP_FRAMES = 3
-# 确认航迹长度来源：保留至少三分钟连续出现的候选
-MIN_TRACK_LENGTH = 4
+# 确认航迹长度来源：保留至少12个有效帧点（约12分钟连续跟踪）
+MIN_TRACK_LENGTH = 12
 # 确认航迹直线性来源：过滤往返跳动明显的候选链
 MIN_TRACK_STRAIGHTNESS = 0.60
 # 确认航迹最大步长来源：过滤相邻帧中心突跳
