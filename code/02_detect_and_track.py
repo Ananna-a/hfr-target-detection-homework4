@@ -381,6 +381,11 @@ def find_track_match(
     best_index = None
     best_distance = KALMAN_GATE_THRESHOLD
     predicted_state, predicted_covariance = predict_track_state(track_state, frame_step)
+    # 长断帧时附加死推算校验，防止Kalman协方差膨胀后的错关联
+    if frame_step > 1:
+        dt_hours = frame_step * TRACK_FRAME_INTERVAL_SECONDS / SECONDS_PER_HOUR
+        dead_x = track_state["last_x"] + track_state["last_vx"] * dt_hours
+        dead_y = track_state["last_y"] + track_state["last_vy"] * dt_hours
     for candidate_index, candidate_row in frame_candidates.iterrows():
         if candidate_index in used_indices:
             continue
@@ -391,9 +396,18 @@ def find_track_match(
             float(candidate_row["mean_vx"] - track_state["last_vx"]),
             float(candidate_row["mean_vy"] - track_state["last_vy"]),
         )
+        # 长断帧时死推算距离必须收敛，防止Kalman波门过宽匹配到错簇
+        dead_distance = 0.0
+        if frame_step > 1:
+            dead_distance = np.hypot(
+                float(candidate_row["center_x"]) - dead_x,
+                float(candidate_row["center_y"]) - dead_y,
+            )
+        max_dead = MAX_LINK_DISTANCE_KM * 0.60 if frame_step > 1 else 0.0
         if (
             distance <= best_distance
             and spatial_distance <= MAX_LINK_DISTANCE_KM
+            and dead_distance <= max_dead
             and velocity_diff <= MAX_VELOCITY_DIFF_KMH
             and vector_velocity_diff <= MAX_VECTOR_VELOCITY_DIFF_KMH
             and is_direction_consistent(candidate_row, track_state)

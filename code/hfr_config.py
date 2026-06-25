@@ -68,11 +68,11 @@ SNR_SCALE_DB = 6.0
 # 聚类幅度尺度来源：有效幅度分布跨度
 AMP_SCALE = 15.0
 # DBSCAN邻域半径来源：物理尺度归一化后的经验值
-DBSCAN_EPS = 1.20
+DBSCAN_EPS = 1.25
 # DBSCAN最少点数来源：候选点簇稳定性要求
-DBSCAN_MIN_SAMPLES = 3
+DBSCAN_MIN_SAMPLES = 2
 # 候选簇最小点数来源：过滤过小点簇
-MIN_CLUSTER_SIZE = 4
+MIN_CLUSTER_SIZE = 3
 # 单帧展示帧来源：该帧有较清晰候选点簇
 DISPLAY_FRAME_ID = 42
 # 航迹关联距离来源：相邻帧一分钟间隔下的候选中心关联门
