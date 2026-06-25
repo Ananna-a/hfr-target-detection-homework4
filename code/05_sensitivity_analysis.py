@@ -113,22 +113,24 @@ SENSITIVITY_SCENARIOS = [
     {
         "scenario_name": "质量确认偏严",
         "stage_name": "质量确认",
-        "changed_parameters": "直线性=0.70, 最大步长=1.50, 平均步长=0.80, 转向=105",
+        "changed_parameters": "直线性=0.70, 最大步长=1.50, 平均步长=0.80, 步进速度=40, 转向=105",
         "overrides": {
             "MIN_TRACK_STRAIGHTNESS": 0.70,
             "MAX_TRACK_STEP_KM": 1.50,
             "MAX_MEAN_TRACK_STEP_KM": 0.80,
+            "MAX_STEP_VELOCITY_KMH": 40.0,
             "MAX_DIRECTION_CHANGE_DEG": 105.0,
         },
     },
     {
         "scenario_name": "质量确认偏松",
         "stage_name": "质量确认",
-        "changed_parameters": "直线性=0.50, 最大步长=2.50, 平均步长=1.30, 转向=145",
+        "changed_parameters": "直线性=0.50, 最大步长=2.50, 平均步长=1.30, 步进速度=80, 转向=145",
         "overrides": {
             "MIN_TRACK_STRAIGHTNESS": 0.50,
             "MAX_TRACK_STEP_KM": 2.50,
             "MAX_MEAN_TRACK_STEP_KM": 1.30,
+            "MAX_STEP_VELOCITY_KMH": 80.0,
             "MAX_DIRECTION_CHANGE_DEG": 145.0,
         },
     },
