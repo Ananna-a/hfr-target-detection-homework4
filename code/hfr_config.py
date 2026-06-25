@@ -109,6 +109,8 @@ MAX_TRACK_STEP_KM = 2.00
 MAX_MEAN_TRACK_STEP_KM = 1.00
 # 确认航迹最大步进速度来源：单步位移除以帧间隔换算速度，过滤错关联导致的异常跳变
 MAX_STEP_VELOCITY_KMH = 55.0
+# 确认航迹最低平均速度来源：过滤静止或极低速噪声串成的伪链
+MIN_CONFIRMED_VELOCITY_KMH = 5.0
 
 
 def ensure_output_dirs() -> None:

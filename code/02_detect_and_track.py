@@ -25,6 +25,7 @@ from hfr_config import (
     MAX_VELOCITY_DIFF_KMH,
     MIN_DIRECTION_STEP_KM,
     MIN_CLUSTER_SIZE,
+    MIN_CONFIRMED_VELOCITY_KMH,
     MIN_TRACK_LENGTH,
     MIN_TRACK_STRAIGHTNESS,
     RESULT_DIR,
@@ -403,7 +404,7 @@ def find_track_match(
                 float(candidate_row["center_x"]) - dead_x,
                 float(candidate_row["center_y"]) - dead_y,
             )
-        max_dead = MAX_LINK_DISTANCE_KM * 0.60 if frame_step > 1 else 0.0
+        max_dead = MAX_LINK_DISTANCE_KM * (0.45 + 0.07 * frame_step) if frame_step > 1 else 0.0
         if (
             distance <= best_distance
             and spatial_distance <= MAX_LINK_DISTANCE_KM
@@ -585,6 +586,7 @@ def filter_track_summary(track_summary: pd.DataFrame) -> pd.DataFrame:
             track_summary["max_step_velocity"].isna()
             | (track_summary["max_step_velocity"] <= MAX_STEP_VELOCITY_KMH)
         )
+        & (np.abs(track_summary["mean_velocity"]) >= MIN_CONFIRMED_VELOCITY_KMH)
     )
     return track_summary[quality_mask].copy()
 
