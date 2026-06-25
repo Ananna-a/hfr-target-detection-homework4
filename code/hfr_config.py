@@ -48,6 +48,8 @@ NEUTRAL_DARK = "#4D4D4D"
 NEUTRAL_BLACK = "#272727"
 # 航迹颜色来源：避开候选簇蓝色以区分确认航迹
 TRACK_COLOR_LIST = ["#B64342", "#2F8F5B", "#9A4D8E", "#0F4D92"]
+# 航迹标记符号来源：图4全局图用不同符号代替颜色区分航迹
+TRACK_MARKER_LIST = ["o", "s", "^", "D", "v", "p", "*", "X"]
 
 # 信噪比分位阈值来源：按帧和距离分区保留高信噪比点迹
 SNR_QUANTILE = 0.80

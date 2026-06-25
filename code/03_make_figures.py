@@ -24,6 +24,7 @@ from hfr_config import (
     TABLE_DIR,
     MIN_DIRECTION_STEP_KM,
     TRACK_COLOR_LIST,
+    TRACK_MARKER_LIST,
     configure_plot_style,
     ensure_output_dirs,
     load_point_table,
@@ -385,16 +386,16 @@ def plot_global_candidate_clusters(
     )
     if not confirmed_tracks.empty:
         for track_order, (track_id, track_group) in enumerate(confirmed_tracks.groupby("track_id")):
-            # 绘制每条确认航迹
+            # 绘制每条确认航迹，用不同符号区分
             track_table = track_group.sort_values("frame_idx")
-            track_color = TRACK_COLOR_LIST[track_order % len(TRACK_COLOR_LIST)]
+            marker = TRACK_MARKER_LIST[track_order % len(TRACK_MARKER_LIST)]
             axis.plot(
                 track_table["center_x"],
                 track_table["center_y"],
-                color=track_color,
+                color=NEUTRAL_BLACK,
                 linewidth=GLOBAL_TRACK_LINE_WIDTH + 0.35,
-                marker="o",
-                markersize=4.0,
+                marker=marker,
+                markersize=5.5,
                 zorder=8,
                 label=f"T{int(track_id)}确认航迹",
             )
@@ -423,51 +424,19 @@ def plot_confirmed_track(
     confirmed_tracks: pd.DataFrame,
     frame_summary: pd.DataFrame,
 ) -> None:
-    # 绘制确认航迹中心移动图，按质量分主图和补充图
+    # 绘制全部确认航迹的局部放大图，每条按自身范围缩放，图4已含全局总览
     if confirmed_tracks.empty:
         return
 
-    track_summary = pd.read_csv(RESULT_DIR / "track_summary.csv")
-    quality_order = track_summary.sort_values(
-        ["straightness", "frame_count", "mean_snr"], ascending=False
-    )["track_id"].astype(int).tolist()
-    all_groups = list(confirmed_tracks.sort_values(["track_id", "frame_idx"]).groupby("track_id"))
-    # 按质量排序重排
-    quality_map = {tid: idx for idx, tid in enumerate(quality_order)}
-    all_groups.sort(key=lambda item: quality_map.get(item[0], 999))
-
-    # 主图：前3条质量最优航迹，1x3横排
-    _draw_track_figure(point_table, frame_summary, all_groups[:3], "图5_主要航迹.png", fixed_cols=3)
-    # 补充图：剩余航迹
-    if len(all_groups) > 3:
-        _draw_track_figure(point_table, frame_summary, all_groups[3:], "图5b_补充航迹.png")
-
-
-def _draw_track_figure(
-    point_table: pd.DataFrame,
-    frame_summary: pd.DataFrame,
-    track_groups: list,
-    file_name: str,
-    fixed_cols: int | None = None,
-) -> None:
-    # 绘制一组航迹的局部放大图，每个子图居中固定窗口，保证尺寸统一
+    track_groups = list(confirmed_tracks.sort_values(["track_id", "frame_idx"]).groupby("track_id"))
     track_count = len(track_groups)
-    ncols = fixed_cols if fixed_cols else min(2, track_count)
-    nrows = (track_count + ncols - 1) // ncols
-    # 计算每个航迹需要的窗口大小，取统一值
-    view_halfs = []
-    for _, track_group in track_groups:
-        dx = track_group["center_x"].max() - track_group["center_x"].min()
-        dy = track_group["center_y"].max() - track_group["center_y"].min()
-        view_halfs.append(max(dx, dy) * 0.6 + 1.0)
-    uniform_half = max(view_halfs)
     figure, axes = plt.subplots(
-        nrows=nrows,
-        ncols=ncols,
-        figsize=(4.8 * ncols, 4.5 * nrows),
+        nrows=1,
+        ncols=track_count,
+        figsize=(4.9 * track_count, 4.2),
         constrained_layout=True,
     )
-    flat_axes = axes.ravel() if track_count > 1 else [axes]
+    flat_axes = [axes] if track_count == 1 else axes
     for track_order, ((track_id, track_group), axis) in enumerate(zip(track_groups, flat_axes)):
         track_table = track_group.sort_values("frame_idx").copy()
         track_table["frame_idx"] = track_table["frame_idx"].astype(int)
@@ -521,17 +490,16 @@ def _draw_track_figure(
         )
         start_time = str(track_table["frame_time"].iloc[0]).split()[-1]
         end_time = str(track_table["frame_time"].iloc[-1]).split()[-1]
-        title_text = f"T{int(track_id)}（F{frame_ids[0]}-F{frame_ids[-1]}，{start_time}-{end_time}）"
-        axis.set_title(title_text, pad=5)
-        set_equal_axis(axis)
-        center_x = track_table["center_x"].mean()
-        center_y = track_table["center_y"].mean()
-        axis.set_xlim(center_x - uniform_half, center_x + uniform_half)
-        axis.set_ylim(center_y - uniform_half, center_y + uniform_half)
+        axis.set_title(
+            f"T{int(track_id)}（F{frame_ids[0]}-F{frame_ids[-1]}，{start_time}-{end_time}，{len(track_table)}帧）",
+            pad=5,
+        )
+        axis.set_xlabel("x / km")
+        axis.set_ylabel("y / km")
+        axis.grid(True, alpha=0.38)
+        set_track_view(axis, track_table)
         axis.legend(loc="upper left", frameon=False, handletextpad=0.45)
-    for extra_axis in flat_axes[track_count:]:
-        extra_axis.axis("off")
-    save_figure(figure, file_name)
+    save_figure(figure, "图5_确认航迹局部放大.png")
 
 
 def set_detection_view(axis: plt.Axes, frame_table: pd.DataFrame, frame_clusters: pd.DataFrame) -> None:
