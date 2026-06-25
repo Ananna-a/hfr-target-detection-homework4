@@ -428,13 +428,31 @@ def plot_confirmed_track(
         return
 
     track_groups = list(confirmed_tracks.sort_values(["track_id", "frame_idx"]).groupby("track_id"))
+    track_count = len(track_groups)
+    ncols = min(2, track_count)
+    nrows = (track_count + ncols - 1) // ncols
+    # 计算所有航迹统一直观范围
+    all_x_min, all_x_max = float("inf"), float("-inf")
+    all_y_min, all_y_max = float("inf"), float("-inf")
+    for track_id, track_group in track_groups:
+        all_x_min = min(all_x_min, track_group["center_x"].min())
+        all_x_max = max(all_x_max, track_group["center_x"].max())
+        all_y_min = min(all_y_min, track_group["center_y"].min())
+        all_y_max = max(all_y_max, track_group["center_y"].max())
+    view_dx = all_x_max - all_x_min
+    view_dy = all_y_max - all_y_min
+    view_margin = max(view_dx, view_dy) * 0.30 + TRACK_VIEW_PADDING_X_KM
+    global_xlim = (all_x_min - view_margin, all_x_max + view_margin)
+    global_ylim = (all_y_min - view_margin, all_y_max + view_margin)
     figure, axes = plt.subplots(
-        nrows=1,
-        ncols=len(track_groups),
-        figsize=(4.9 * len(track_groups), 4.1),
+        nrows=nrows,
+        ncols=ncols,
+        figsize=(5.0 * ncols, 4.5 * nrows),
         constrained_layout=True,
+        sharex=True,
+        sharey=True,
     )
-    flat_axes = np.atleast_1d(axes)
+    flat_axes = axes.ravel() if track_count > 1 else [axes]
     for track_order, ((track_id, track_group), axis) in enumerate(zip(track_groups, flat_axes)):
         # 绘制单条确认航迹局部图
         track_table = track_group.sort_values("frame_idx").copy()
@@ -494,8 +512,11 @@ def plot_confirmed_track(
         title_text = f"T{int(track_id)}（F{frame_ids[0]}-F{frame_ids[-1]}，{start_time}-{end_time}）"
         axis.set_title(title_text, pad=5)
         set_equal_axis(axis)
-        set_track_view(axis, track_table)
+        axis.set_xlim(global_xlim)
+        axis.set_ylim(global_ylim)
         axis.legend(loc="upper left", frameon=False, handletextpad=0.45)
+    for extra_axis in flat_axes[track_count:]:
+        extra_axis.axis("off")
     save_figure(figure, "图5_确认航迹局部放大.png")
 
 

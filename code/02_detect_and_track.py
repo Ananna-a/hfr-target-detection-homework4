@@ -17,6 +17,7 @@ from hfr_config import (
     LOCAL_RANGE_MIN_POINTS,
     MAX_DIRECTION_CHANGE_DEG,
     MAX_MEAN_TRACK_STEP_KM,
+    MAX_STEP_VELOCITY_KMH,
     MAX_LINK_DISTANCE_KM,
     MAX_TRACK_GAP_FRAMES,
     MAX_TRACK_STEP_KM,
@@ -85,10 +86,9 @@ TRACK_SUMMARY_COLUMNS = [
     "straightness",
     "mean_step",
     "max_step",
+    "max_step_velocity",
     "max_turn_angle",
 ]
-# 航迹允许跨帧来源：断帧数加当前关联帧
-MAX_TRACK_FRAME_STEP = MAX_TRACK_GAP_FRAMES + 1
 # 加权中心基准来源：保证权重为正
 CLUSTER_WEIGHT_EPS = 1e-6
 # 状态向量维度来源：常速模型[x,vx,y,vy]
@@ -418,7 +418,7 @@ def link_tracks(cluster_table: pd.DataFrame) -> pd.DataFrame:
 
         for track_state in active_tracks:
             frame_step = int(frame_idx - track_state["last_frame"])
-            if frame_step < 1 or frame_step > MAX_TRACK_FRAME_STEP:
+            if frame_step < 1 or frame_step > MAX_TRACK_GAP_FRAMES + 1:
                 continue
             best_index, predicted_state, predicted_covariance = find_track_match(
                 frame_candidates,
@@ -476,7 +476,7 @@ def link_tracks(cluster_table: pd.DataFrame) -> pd.DataFrame:
         active_tracks = [
             track_state
             for track_state in active_tracks
-            if frame_idx - track_state["last_frame"] <= MAX_TRACK_FRAME_STEP
+            if frame_idx - track_state["last_frame"] <= MAX_TRACK_GAP_FRAMES + 1
         ]
 
     if not track_rows:
@@ -533,7 +533,10 @@ def summarize_tracks(confirmed_tracks: pd.DataFrame) -> pd.DataFrame:
     for track_id, track_group in ordered_tracks.groupby("track_id"):
         # 计算航迹形态质量指标
         coordinate_values = track_group[["center_x", "center_y"]].to_numpy(dtype=float)
+        frame_values = track_group["frame_idx"].to_numpy(dtype=int)
         step_distances = np.linalg.norm(np.diff(coordinate_values, axis=0), axis=1)
+        frame_diffs = np.diff(frame_values)
+        step_velocities = step_distances * 60.0 / np.maximum(frame_diffs, 1)
         path_length = float(step_distances.sum())
         displacement = float(np.linalg.norm(coordinate_values[-1] - coordinate_values[0]))
         straightness = displacement / path_length if path_length > 0 else 0.0
@@ -545,6 +548,7 @@ def summarize_tracks(confirmed_tracks: pd.DataFrame) -> pd.DataFrame:
                 "straightness": straightness,
                 "mean_step": float(step_distances.mean()) if len(step_distances) else 0.0,
                 "max_step": float(step_distances.max()) if len(step_distances) else 0.0,
+                "max_step_velocity": float(step_velocities.max()) if len(step_velocities) else 0.0,
                 "max_turn_angle": float(max(turn_angles)) if turn_angles else 0.0,
             }
         )
@@ -563,6 +567,10 @@ def filter_track_summary(track_summary: pd.DataFrame) -> pd.DataFrame:
         & (track_summary["max_step"] <= MAX_TRACK_STEP_KM)
         & (track_summary["mean_step"] <= MAX_MEAN_TRACK_STEP_KM)
         & (track_summary["max_turn_angle"] <= MAX_DIRECTION_CHANGE_DEG)
+        & (
+            track_summary["max_step_velocity"].isna()
+            | (track_summary["max_step_velocity"] <= MAX_STEP_VELOCITY_KMH)
+        )
     )
     return track_summary[quality_mask].copy()
 

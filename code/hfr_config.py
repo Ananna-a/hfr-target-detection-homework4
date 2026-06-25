@@ -50,9 +50,9 @@ NEUTRAL_BLACK = "#272727"
 TRACK_COLOR_LIST = ["#B64342", "#2F8F5B", "#9A4D8E", "#0F4D92"]
 
 # 信噪比分位阈值来源：按帧和距离分区保留高信噪比点迹
-SNR_QUANTILE = 0.85
+SNR_QUANTILE = 0.80
 # 幅度分位阈值来源：按帧和距离分区保留高幅度点迹
-AMP_QUANTILE = 0.65
+AMP_QUANTILE = 0.58
 # 距离分区数量来源：改善不同距离背景强弱差异
 LOCAL_RANGE_BIN_COUNT = 6
 # 距离分区最少点数来源：避免小样本阈值不稳定
@@ -68,15 +68,15 @@ SNR_SCALE_DB = 6.0
 # 聚类幅度尺度来源：有效幅度分布跨度
 AMP_SCALE = 15.0
 # DBSCAN邻域半径来源：物理尺度归一化后的经验值
-DBSCAN_EPS = 1.10
+DBSCAN_EPS = 1.20
 # DBSCAN最少点数来源：候选点簇稳定性要求
-DBSCAN_MIN_SAMPLES = 4
+DBSCAN_MIN_SAMPLES = 3
 # 候选簇最小点数来源：过滤过小点簇
-MIN_CLUSTER_SIZE = 5
+MIN_CLUSTER_SIZE = 4
 # 单帧展示帧来源：该帧有较清晰候选点簇
 DISPLAY_FRAME_ID = 42
 # 航迹关联距离来源：相邻帧一分钟间隔下的候选中心关联门
-MAX_LINK_DISTANCE_KM = 5.0
+MAX_LINK_DISTANCE_KM = 4.0
 # 航迹预测时间间隔来源：本数据相邻帧时间间隔为60秒
 TRACK_FRAME_INTERVAL_SECONDS = 60.0
 # 小时换算来源：速度单位为km/h
@@ -90,15 +90,15 @@ KALMAN_ACCEL_STD_KMH2 = 120.0
 # 马氏距离波门来源：二维卡方门限的保守取值
 KALMAN_GATE_THRESHOLD = 9.21
 # 航迹关联速度差来源：相邻帧径向速度最大允许差
-MAX_VELOCITY_DIFF_KMH = 15.0
+MAX_VELOCITY_DIFF_KMH = 12.0
 # 航迹关联速度矢量差来源：约束xy速度分量突变
-MAX_VECTOR_VELOCITY_DIFF_KMH = 8.0
+MAX_VECTOR_VELOCITY_DIFF_KMH = 6.0
 # 航迹方向最小步长来源：过短中心位移不参与方向判决
 MIN_DIRECTION_STEP_KM = 0.25
 # 航迹方向变化阈值来源：过滤相邻帧明显反向跳接
 MAX_DIRECTION_CHANGE_DEG = 125.0
 # 航迹最大断帧来源：允许候选短暂缺失后重连
-MAX_TRACK_GAP_FRAMES = 1
+MAX_TRACK_GAP_FRAMES = 3
 # 确认航迹长度来源：保留至少三分钟连续出现的候选
 MIN_TRACK_LENGTH = 4
 # 确认航迹直线性来源：过滤往返跳动明显的候选链
@@ -107,6 +107,8 @@ MIN_TRACK_STRAIGHTNESS = 0.60
 MAX_TRACK_STEP_KM = 2.00
 # 确认航迹平均步长来源：过滤整体跳动偏大的候选链
 MAX_MEAN_TRACK_STEP_KM = 1.00
+# 确认航迹最大步进速度来源：单步位移除以帧间隔换算速度，过滤错关联导致的异常跳变
+MAX_STEP_VELOCITY_KMH = 55.0
 
 
 def ensure_output_dirs() -> None:

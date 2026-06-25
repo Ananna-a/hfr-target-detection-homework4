@@ -19,6 +19,7 @@ DISPLAY_COLUMNS = [
     "path_length",
     "straightness",
     "max_step",
+    "max_step_velocity",
     "max_turn_angle",
 ]
 # 整数列来源：航迹编号和帧编号
@@ -31,6 +32,7 @@ ROUND_COLUMNS = [
     "path_length",
     "straightness",
     "max_step",
+    "max_step_velocity",
     "max_turn_angle",
 ]
 
